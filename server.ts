@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 import { initializeDatabase } from './server/database/db.js';
@@ -33,6 +34,45 @@ async function startServer() {
     // Standard middlewares
     app.use(express.json());
     app.use(cookieParser());
+
+    // Gzip compression for API + static responses (built-in zlib, zero deps)
+    app.use((req, res, next) => {
+      const acceptEncoding = req.headers['accept-encoding'] || '';
+      if (!acceptEncoding.includes('gzip') || res.getHeader('Content-Encoding')) return next();
+
+      const gzip = zlib.createGzip({ level: 6 });
+      res.setHeader('Content-Encoding', 'gzip');
+      res.removeHeader('Content-Length');
+
+      // Route writes through the gzip stream
+      const originalWrite = res.write.bind(res);
+      const originalEnd = res.end.bind(res);
+      res.write = ((chunk: any, encoding?: BufferEncoding, cb?: (error?: Error | null) => void) => {
+        gzip.write(chunk, encoding);
+        if (cb) cb(null);
+        return true;
+      }) as any;
+      res.end = ((chunk?: any, encoding?: BufferEncoding, cb?: () => void) => {
+        if (chunk && chunk.length > 0) gzip.write(chunk, encoding);
+        gzip.end();
+        gzip.on('data', (d) => originalWrite(d));
+        gzip.on('end', () => originalEnd(undefined, encoding, cb));
+        return res as any;
+      }) as any;
+      res.on('close', () => gzip.destroy());
+      next();
+    });
+
+    // Static asset cache headers (Vite emits hashed filenames → long-lived cache)
+    app.use((req, res, next) => {
+      if (process.env.NODE_ENV === 'production') {
+        const isAsset = /\.(js|css|woff2?|png|jpg|jpeg|svg|webp|ico)(\?|$)/.test(req.path);
+        res.setHeader('Cache-Control', isAsset
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=0, must-revalidate');
+      }
+      next();
+    });
 
     // Security headers (inline helmet-equivalent)
     app.use((req, res, next) => {

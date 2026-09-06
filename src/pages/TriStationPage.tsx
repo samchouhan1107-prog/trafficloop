@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../services/api.js';
 import { useToast } from '../context/ToastContext.js';
+import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import {
   TriStationEngineResponse,
   StationControlPayload,
@@ -30,7 +31,6 @@ export function TriStationPage({ onNavigate }: TriStationPageProps) {
   const [engineData, setEngineData] = useState<TriStationEngineResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch Tri-Station engine state
   const fetchState = async (isBackground = false) => {
@@ -49,16 +49,10 @@ export function TriStationPage({ onNavigate }: TriStationPageProps) {
   // Initial load and periodic polling
   useEffect(() => {
     fetchState(false);
-
-    // Poll every 1s for smooth per-second countdowns and live telemetry
-    pollTimerRef.current = setInterval(() => {
-      fetchState(true);
-    }, 1000);
-
-    return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    };
   }, []);
+
+  // Poll while visible only (auto-pauses when tab hidden to save CPU/network)
+  useVisibilityPoll(() => fetchState(true), 1000, []);
 
   // Handle station control actions
   const handleControl = async (payload: StationControlPayload) => {

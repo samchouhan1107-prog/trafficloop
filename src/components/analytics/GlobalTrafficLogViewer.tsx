@@ -85,11 +85,11 @@ export function GlobalTrafficLogViewer({ campaigns = [] }: GlobalTrafficLogViewe
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Auto-refresh interval (12 seconds)
+  // Auto-refresh interval (12 seconds), paused when tab hidden
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
-      fetchLogData();
+      if (document.visibilityState === 'visible') fetchLogData();
     }, 12000);
     return () => clearInterval(interval);
   }, [autoRefresh, selectedCampaignId, selectedCountry, selectedStatus, searchQuery]);

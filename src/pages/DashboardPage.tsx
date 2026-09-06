@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.js';
 import { useToast } from '../context/ToastContext.js';
 import { api } from '../services/api.js';
 import { StatCard } from '../components/common/StatCard.js';
+import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import { CampaignCard } from '../components/campaigns/CampaignCard.js';
 import { CampaignFormModal } from '../components/campaigns/CampaignFormModal.js';
 import { CampaignStatsModal } from '../components/campaigns/CampaignStatsModal.js';
@@ -72,13 +73,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     }
   };
 
+  // Initial load
   useEffect(() => {
     loadDashboard();
-    const interval = setInterval(() => {
-      loadDashboard(true);
-    }, 6000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Poll every 6s while the tab is visible (pauses automatically when hidden)
+  useVisibilityPoll(() => loadDashboard(true), 6000, []);
 
   const handleClaimBonusOption = async (optionId: string = 'ten_thousand_visits_boost') => {
     try {

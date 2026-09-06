@@ -371,16 +371,24 @@ export class TrafficDeliveryWorkerService {
 
     let visitsDeliveredCount = 0;
 
-    for (const campaign of activeCampaigns) {
-      const remainingBudget = campaign.credit_budget - campaign.spent_credits;
-      const hasBonusQuota = Number(campaign.bonus_visits_delivered || 0) < Number(campaign.bonus_visit_limit || 0);
-      const hasBudget = remainingBudget >= campaign.credit_cost_per_visit;
+    // Batch all deliveries inside a single transaction for atomicity + write performance
+    db.exec('BEGIN');
+    try {
+      for (const campaign of activeCampaigns) {
+        const remainingBudget = campaign.credit_budget - campaign.spent_credits;
+        const hasBonusQuota = Number(campaign.bonus_visits_delivered || 0) < Number(campaign.bonus_visit_limit || 0);
+        const hasBudget = remainingBudget >= campaign.credit_cost_per_visit;
 
-      if (!hasBonusQuota && !hasBudget) continue;
+        if (!hasBonusQuota && !hasBudget) continue;
 
-      // Deliver 1 visit per active campaign per cycle
-      this.deliverSingleVisit(campaign);
-      visitsDeliveredCount++;
+        // Deliver 1 visit per active campaign per cycle
+        this.deliverSingleVisit(campaign);
+        visitsDeliveredCount++;
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
     }
 
     return visitsDeliveredCount;

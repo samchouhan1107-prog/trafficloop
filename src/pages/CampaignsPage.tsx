@@ -10,6 +10,7 @@ import { CampaignSettingsModal } from '../components/campaigns/CampaignSettingsM
 import { CampaignVerifySettingsModal } from '../components/campaigns/CampaignVerifySettingsModal.js';
 import { BuyCreditsModal } from '../components/payments/BuyCreditsModal.js';
 import { Modal } from '../components/common/Modal.js';
+import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import { Plus, Search, Filter, Globe, Sparkles, Building2, Zap, ShieldCheck, MapPin, CheckCircle2, ArrowRight } from 'lucide-react';
 import { formatCredits } from '../utils/formatters.js';
 
@@ -49,11 +50,10 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
 
   useEffect(() => {
     fetchCampaigns();
-    const interval = setInterval(() => {
-      fetchCampaigns(true);
-    }, 6000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Poll while visible only (auto-pauses when tab hidden)
+  useVisibilityPoll(() => fetchCampaigns(true), 6000, []);
 
   const handleToggleStatus = async (id: string) => {
     try {

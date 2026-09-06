@@ -369,7 +369,10 @@ function setupSchemaAndTables(): void {
     CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_user_id);
     CREATE INDEX IF NOT EXISTS idx_visits_campaign ON visits(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_visits_created ON visits(created_at);
+    CREATE INDEX IF NOT EXISTS idx_visits_completed ON visits(completed_at);
+    CREATE INDEX IF NOT EXISTS idx_visits_status ON visits(status);
     CREATE INDEX IF NOT EXISTS idx_credit_tx_user ON credit_transactions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_credit_tx_created ON credit_transactions(created_at);
     CREATE INDEX IF NOT EXISTS idx_reviews_campaign ON campaign_reviews(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_payments_user ON payment_orders(user_id);
     CREATE INDEX IF NOT EXISTS idx_payments_status ON payment_orders(status);
@@ -377,6 +380,9 @@ function setupSchemaAndTables(): void {
     CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger(status);
     CREATE INDEX IF NOT EXISTS idx_rewards_event ON reward_ledger(qualifying_event_id);
     CREATE INDEX IF NOT EXISTS idx_rewards_created ON reward_ledger(created_at);
+    CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
   `);
 
   // Insert default settings if not exists
