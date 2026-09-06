@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Primary Meta -->
+    <title>TrafficLoop · WebZoneBW — Verified Website Traffic Exchange</title>
+    <meta name="description" content="TrafficLoop is a decentralized, verified website traffic exchange. Get 500K lifetime free visits per new URL, real human dwell traffic, geo targeting, and GA4-verified analytics for WebZoneBW." />
+    <meta name="keywords" content="traffic exchange, website traffic, free visits, SEO traffic, WebZoneBW, verified visits, dwell time, geo targeting, GA4 analytics" />
+    <meta name="author" content="WebZoneBW" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TrafficLoop" />
+    <meta property="og:title" content="TrafficLoop · Verified Website Traffic Exchange" />
+    <meta property="og:description" content="+500,000 lifetime free visits per new URL. Real verified human traffic with dwell-time control, geo targeting, and GA4 analytics." />
+    <meta property="og:url" content="https://trafficloop.global/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TrafficLoop · Verified Website Traffic Exchange" />
+    <meta name="twitter:description" content="+500,000 lifetime free visits per new URL. Real verified human traffic with dwell-time control, geo targeting, and GA4 analytics." />
+
+    <!-- Mobile Web App -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TrafficLoop" />
+
+    <!-- Favicon (inline SVG, no extra request) -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%233b82f6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%23020617'/%3E%3Cpath d='M14 42 L28 18 L36 32 L42 24 L50 42 Z' fill='url(%23g)'/%3E%3C/svg%3E" />
+
+    <!-- Fonts: preconnect + display=swap for no FOIT -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Pre-render anti-flash: dark theme applied before CSS loads -->
+    <style>
+      html, body { background-color: #020617; }
+      #root:empty { min-height: 100vh; }
+    </style>
+  </head>
+  <body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-cyan-500 selection:text-white font-sans">
+    <!-- Lightweight boot splash: replaced instantly once React mounts -->
+    <div id="boot-splash" aria-hidden="true">
+      <div class="boot-splash-inner">
+        <div class="boot-logo">⨯</div>
+        <div class="boot-bar"><span></span></div>
+        <p>Connecting to TrafficLoop Network...</p>
+      </div>
+      <style>
+        #boot-splash {
+          position: fixed; inset: 0; z-index: 9999;
+          display: flex; align-items: center; justify-content: center;
+          background: radial-gradient(ellipse at 50% 40%, #0b1526 0%, #020617 70%);
+          color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+          letter-spacing: 0.08em; transition: opacity 0.45s ease, visibility 0.45s;
+        }
+        #boot-splash.is-done { opacity: 0; visibility: hidden; pointer-events: none; }
+        .boot-splash-inner { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+        .boot-logo {
+          width: 52px; height: 52px; display: flex; align-items: center; justify-content: center;
+          font-size: 26px; font-weight: 800; color: #22d3ee; border-radius: 14px;
+          border: 1px solid rgba(34, 211, 238, 0.35); background: rgba(8, 22, 40, 0.8);
+          box-shadow: 0 0 40px rgba(34, 211, 238, 0.15); animation: bootPulse 1.6s ease-in-out infinite;
+        }
+        .boot-bar { width: 160px; height: 3px; border-radius: 999px; background: rgba(30, 41, 59, 0.9); overflow: hidden; }
+        .boot-bar span { display: block; height: 100%; width: 40%; border-radius: 999px; background: linear-gradient(90deg, #22d3ee, #3b82f6); animation: bootSlide 1.2s ease-in-out infinite; }
+        @keyframes bootPulse { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.06); opacity: 1; } }
+        @keyframes bootSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+        @media (prefers-reduced-motion: reduce) { #boot-splash * { animation: none !important; } }
+      </style>
+    </div>
+
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

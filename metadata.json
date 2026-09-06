@@ -1,0 +1,7 @@
+{
+  "name": "TrafficLoop",
+  "description": "Production-ready website traffic exchange platform for the WebZoneBW ecosystem featuring real-time surfing engine, global traffic log, verified visit timer, credit ledger, automated safety review, and admin operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
