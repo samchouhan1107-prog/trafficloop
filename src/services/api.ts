@@ -13,11 +13,13 @@ export class ApiError extends Error {
 
 class ApiClient {
   private token: string | null = null;
+  private baseUrl: string;
 
   constructor() {
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('trafficloop_token');
     }
+    this.baseUrl = import.meta.env.VITE_API_URL || '';
   }
 
   setToken(token: string | null) {
@@ -45,12 +47,14 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
+    const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;
+
     // 15-second request timeout to prevent hanging connections or infinite spinners
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(url, {
         ...options,
         headers,
         signal: options.signal || controller.signal
