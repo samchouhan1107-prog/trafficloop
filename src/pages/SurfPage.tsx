@@ -6,6 +6,7 @@ import { SurfSessionPayload, SurfCompleteResult, SurfEngineDiagnostics } from '.
 import { SurfViewer } from '../components/surf/SurfViewer.js';
 import { SurfSidebar } from '../components/surf/SurfSidebar.js';
 import { SurfControls } from '../components/surf/SurfControls.js';
+import { LiveCyclePoolMonitor } from '../components/surf/LiveCyclePoolMonitor.js';
 import { Flame, AlertCircle, RefreshCw, Plus, Sparkles, CheckCircle2, Gift, Cpu, ShieldCheck, Activity, Trophy, Monitor } from 'lucide-react';
 import { Modal } from '../components/common/Modal.js';
 import { formatCredits, formatInr, formatNumber } from '../utils/formatters.js';
@@ -23,10 +24,11 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
   const [emptyPool, setEmptyPool] = useState(false);
   const [emptyMessage, setEmptyMessage] = useState<string>('');
 
-  // Timing state
+  // Timing & Active Dwell state
   const [timeLeft, setTimeLeft] = useState<number>(15);
   const [totalDuration, setTotalDuration] = useState<number>(15);
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [activeDwellSeconds, setActiveDwellSeconds] = useState<number>(0);
+  const [isTabActive, setIsTabActive] = useState<boolean>(true);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isTimerFinished, setIsTimerFinished] = useState<boolean>(false);
 
@@ -52,6 +54,47 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Track window visibility & focus for authentic dwell time
+  useEffect(() => {
+    const updateTabActive = () => {
+      const active = !document.hidden && document.hasFocus();
+      setIsTabActive(active);
+    };
+
+    window.addEventListener('visibilitychange', updateTabActive);
+    window.addEventListener('focus', updateTabActive);
+    window.addEventListener('blur', updateTabActive);
+
+    return () => {
+      window.removeEventListener('visibilitychange', updateTabActive);
+      window.removeEventListener('focus', updateTabActive);
+      window.removeEventListener('blur', updateTabActive);
+    };
+  }, []);
+
+  // Heartbeat loop (Every 2.5s) to record active vs background dwell server-side
+  useEffect(() => {
+    if (!session || isLoadingSession || isTimerFinished || isPaused) return;
+
+    heartbeatRef.current = setInterval(async () => {
+      const isVisible = !document.hidden;
+      const isFocused = document.hasFocus();
+      try {
+        const hbResult = await api.sendSurfHeartbeat(session.session_token, isVisible, isFocused);
+        if (hbResult && typeof hbResult.activeDwellSeconds === 'number') {
+          setActiveDwellSeconds(Math.round(hbResult.activeDwellSeconds));
+        }
+      } catch {
+        // Non-blocking
+      }
+    }, 2500);
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    };
+  }, [session, isLoadingSession, isTimerFinished, isPaused]);
 
   // Fetch engine diagnostics on load
   const loadDiagnostics = async () => {
@@ -100,7 +143,6 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
       setSession(data);
       setTimeLeft(data.campaign.duration_seconds);
       setTotalDuration(data.campaign.duration_seconds);
-      setElapsedSeconds(0);
     } catch (err: any) {
       setEmptyPool(true);
       setEmptyMessage(err.message || 'No eligible campaigns available at this moment.');
@@ -122,12 +164,18 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
     };
   }, []);
 
-  // Timer Tick
+  // Timer Tick - strictly requires active window focus and visibility
   useEffect(() => {
     if (isLoadingSession || !session || isPaused || isTimerFinished) return;
 
     timerRef.current = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
+      const isVisibleAndFocused = !document.hidden && document.hasFocus();
+      if (!isVisibleAndFocused) {
+        setIsTabActive(false);
+        return; // Pause timer progression while tab is unfocused/inactive
+      }
+      setIsTabActive(true);
+
       setTimeLeft((prev) => {
         if (prev <= 1) {
           if (timerRef.current) clearInterval(timerRef.current);
@@ -151,7 +199,8 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
       setIsClaiming(true);
       setClaimError(null);
 
-      const result = await api.completeSurfSession(session.session_token, selectedChallengeId, elapsedSeconds || totalDuration);
+      const effectiveDwell = Math.max(totalDuration, activeDwellSeconds);
+      const result = await api.completeSurfSession(session.session_token, selectedChallengeId, effectiveDwell);
       
       const isMystery = Boolean(result.mysteryReward && result.mysteryReward.unlocked);
       playRewardAudio(isMystery);
@@ -190,11 +239,7 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
         }, 1500);
       }
     } catch (err: any) {
-      if (err?.code === 'INSUFFICIENT_DWELL' && err.remainingSeconds) {
-        setClaimError(`⏳ ${err.remainingSeconds} more second${err.remainingSeconds > 1 ? 's' : ''} required — keep viewing the site, then claim.`);
-      } else {
-        setClaimError(err.message || 'Failed to verify reward. Please try again.');
-      }
+      setClaimError(err.message || 'Failed to verify reward. Please try again.');
     } finally {
       setIsClaiming(false);
     }
@@ -204,21 +249,19 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
     <div className="space-y-3 pb-6 h-[calc(100vh-8.5rem)] flex flex-col">
       {/* Engine Status / Algorithm HUD */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/80 px-4 py-2 text-xs text-slate-400">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5 font-bold text-cyan-300">
             <Cpu className="h-3.5 w-3.5 text-cyan-400" />
             <span>Splash & TrafficPeak Weighted V3 Engine</span>
           </div>
-          <span className="text-slate-600">|</span>
-          <span className="text-emerald-400 font-semibold flex items-center gap-1">
-            <Activity className="h-3 w-3" />
-            1:1 Fair Exchange · Zero-Stall Auto Pacing
-          </span>
+          <span className="text-slate-600 hidden sm:inline">|</span>
+          <LiveCyclePoolMonitor
+            onSelectSite={(id) => startNextSession(id)}
+            currentCampaignId={session?.campaign?.id}
+          />
         </div>
 
         <div className="flex items-center gap-3 font-mono text-[11px]">
-          <span>Pool: <strong className="text-white">{engineDiag?.activeCampaignsInPool || 6} Active Sites</strong></span>
-          <span className="text-slate-600">|</span>
           <button
             type="button"
             onClick={() => onNavigate('/tri-station')}
@@ -229,6 +272,19 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
           </button>
         </div>
       </div>
+
+      {/* Active Spend-time Verification Status Banner */}
+      {!isTabActive && session && !isTimerFinished && (
+        <div className="flex items-center justify-between rounded-xl bg-amber-950/80 border border-amber-600/70 px-4 py-2 text-xs text-amber-200">
+          <div className="flex items-center gap-2 font-bold">
+            <AlertCircle className="h-4 w-4 text-amber-400" />
+            <span>Tab Inactive · Spend-time verification paused. Please focus this tab to continue countdown.</span>
+          </div>
+          <span className="font-mono text-[11px] text-amber-300">
+            Active Dwell: {activeDwellSeconds}s / {totalDuration}s
+          </span>
+        </div>
+      )}
 
       {/* Top Banner if reward claimed */}
       {claimedReward && (
@@ -286,6 +342,8 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
               isPaused={isPaused}
               category={session.campaign.category}
               isNetworkShowcase={session.campaign.is_network_showcase}
+              canEmbedInIframe={session.campaign.canEmbedInIframe}
+              sessionToken={session.session_token}
             />
           </div>
 
@@ -295,7 +353,6 @@ export function SurfPage({ onNavigate }: SurfPageProps) {
               session={session}
               timeLeft={timeLeft}
               totalDuration={totalDuration}
-              elapsedSeconds={elapsedSeconds}
               isTimerFinished={isTimerFinished}
               selectedChallengeId={selectedChallengeId}
               isClaiming={isClaiming}

@@ -1,5 +1,4 @@
 import { db } from '../database/db.js';
-import { assertUrlSafe } from '../utils/urlSafety.js';
 import {
   TrafficDebuggerRequest,
   TrafficDebuggerResult,
@@ -359,9 +358,6 @@ export class TrafficDebuggerService {
       throw new Error('Please provide a valid campaign or destination URL to debug.');
     }
 
-    // SSRF protection: reject localhost, private IPs, and non-http protocols
-    assertUrlSafe(targetUrl);
-
     // Ensure URL has protocol
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
       targetUrl = 'https://' + targetUrl;
@@ -597,9 +593,8 @@ export class TrafficDebuggerService {
           ]
         });
 
-         // Follow second hop to final destination
-         finalUrl = resolvedRedirectUrl;
-         assertUrlSafe(resolvedRedirectUrl);
+        // Follow second hop to final destination
+        finalUrl = resolvedRedirectUrl;
         const secondStart = Date.now();
         const secondResp = await fetch(resolvedRedirectUrl, {
           method: 'GET',

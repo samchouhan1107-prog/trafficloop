@@ -18,7 +18,7 @@ triStationRoutes.get('/state', (req: AuthenticatedRequest, res: Response) => {
     res.json(state);
   } catch (error: any) {
     console.error('Failed to get tri-station state:', error);
-    res.status(500).json({ error: 'Failed to retrieve tri-station state' });
+    res.status(500).json({ error: error.message || 'Failed to retrieve tri-station state' });
   }
 });
 
@@ -38,7 +38,7 @@ triStationRoutes.post('/control', (req: AuthenticatedRequest, res: Response) => 
     res.json(state);
   } catch (error: any) {
     console.error('Failed to execute tri-station control:', error);
-    res.status(500).json({ error: 'Failed to execute station control' });
+    res.status(500).json({ error: error.message || 'Failed to execute station control' });
   }
 });
 
@@ -74,7 +74,7 @@ triStationRoutes.post('/push-url', (req: AuthenticatedRequest, res: Response) =>
       state
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to push URL to stations' });
+    res.status(500).json({ error: error.message || 'Failed to push URL to stations' });
   }
 });
 
@@ -103,7 +103,7 @@ triStationRoutes.post('/rotational-class', (req: AuthenticatedRequest, res: Resp
       state
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to update rotational class' });
+    res.status(500).json({ error: error.message || 'Failed to update rotational class' });
   }
 });
 
@@ -116,7 +116,7 @@ triStationRoutes.post('/start-all', (req: AuthenticatedRequest, res: Response) =
     const state = TriStationTrafficEngineService.executeControl({ action: 'start' });
     res.json(state);
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to start all stations' });
+    res.status(500).json({ error: error.message || 'Failed to start all stations' });
   }
 });
 
@@ -129,6 +129,6 @@ triStationRoutes.post('/stop-all', (req: AuthenticatedRequest, res: Response) =>
     const state = TriStationTrafficEngineService.executeControl({ action: 'stop' });
     res.json(state);
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to stop all stations' });
+    res.status(500).json({ error: error.message || 'Failed to stop all stations' });
   }
 });

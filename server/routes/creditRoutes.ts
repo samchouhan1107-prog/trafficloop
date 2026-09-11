@@ -61,7 +61,7 @@ creditRoutes.post('/convert', (req, res: Response) => {
       formattedResult: CurrencyConversionService.formatCurrency(converted, to)
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -78,7 +78,7 @@ creditRoutes.get('/valuation', (req: AuthenticatedRequest, res: Response) => {
     const valuation = CurrencyConversionService.calculateCreditValue(req.user!.credits, preferredCurrency);
     res.json(valuation);
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -127,7 +127,7 @@ creditRoutes.get('/daily-bonus/status', (req: AuthenticatedRequest, res: Respons
     const status = CreditLedgerService.getDailyBonusStatus(req.user!.id);
     res.json(status);
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -148,7 +148,7 @@ creditRoutes.post('/daily-bonus', (req: AuthenticatedRequest, res: Response) => 
     }
     res.json(result);
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -207,6 +207,6 @@ creditRoutes.post('/transfer', (req: AuthenticatedRequest, res: Response) => {
       newBalance: senderResult.newBalance
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });

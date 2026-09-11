@@ -12,24 +12,26 @@ import {
   RewardsEligibilityResponse, 
   ClaimRewardPayload, 
   ClaimRewardResult,
-  VerifiedActivityItem 
+  VerifiedActivityItem,
+  MonthlyPointsMetrics,
+  ActivityEventPayload,
+  ActivityEventResult
 } from '../../src/types.js';
 
 export class RewardService {
   /**
    * Evaluates verified completed visits for an authenticated user
    * and ensures legitimate reward eligibility records exist in reward_ledger.
+   * Prevents duplicate crediting by checking settled credit transactions.
    */
   static syncUserEligibleRewards(userId: string): void {
     try {
-      // Find all completed visits made by this user that have no entry in reward_ledger
+      // Find all visits made by this user that have no entry in reward_ledger
       const unrecordedVisits = db.prepare(`
         SELECT v.*, c.title as campaign_title, c.target_locations
         FROM visits v
         LEFT JOIN campaigns c ON v.campaign_id = c.id
         WHERE v.visitor_user_id = ?
-          AND v.status = 'completed'
-          AND v.observation_status = 'VERIFIED'
           AND v.id NOT IN (SELECT qualifying_event_id FROM reward_ledger WHERE user_id = ?)
         ORDER BY v.created_at ASC
       `).all(userId, userId) as any[];
@@ -41,19 +43,19 @@ export class RewardService {
       const insertStmt = db.prepare(`
         INSERT INTO reward_ledger (
           id, user_id, eligibility_source, qualifying_event_id,
-          amount_inr, amount_credits, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'ELIGIBLE', ?)
+          amount_inr, amount_credits, points, month, status, transaction_id, notes, created_at, claimed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const visit of unrecordedVisits) {
         const rewardId = `rw-${crypto.randomUUID()}`;
         const creditsEarned = Number(visit.credits_earned) || 1.0;
+        const pointsEarned = Math.round(creditsEarned * 100);
         
         // Calculate INR value from credits
         const inrValuation = CurrencyConversionService.calculateCreditValue(creditsEarned, 'INR');
         let amountInr = inrValuation.inrValue;
         
-        // Extra India target qualification bonus
         const isIndiaTarget = (visit.visitor_country_code === 'IN' || 
                                visit.visitor_country === 'India' || 
                                (visit.target_locations && visit.target_locations.toLowerCase().includes('india')));
@@ -61,8 +63,45 @@ export class RewardService {
         let source = 'verified_surf_dwell';
         if (isIndiaTarget) {
           source = 'verified_india_visitor_milestone';
-          amountInr = Number((amountInr + 0.50).toFixed(2)); // ₹0.50 India Campaign verification bonus
+          amountInr = Number((amountInr + 0.50).toFixed(2));
         }
+
+        // Check verification and settlement status
+        const isVerified = visit.status === 'completed' && visit.observation_status === 'VERIFIED';
+        const isPending = visit.status === 'started' || visit.observation_status === 'PENDING';
+        
+        // Check if credits were already credited in credit_transactions
+        const existingTx = db.prepare(`
+          SELECT id, created_at FROM credit_transactions 
+          WHERE user_id = ? AND (reference_id = ? OR reference_id = ? OR description LIKE ?)
+          LIMIT 1
+        `).get(userId, visit.id, visit.campaign_id, `%${visit.campaign_title || visit.id}%`) as any;
+
+        let ledgerStatus: 'ELIGIBLE' | 'CLAIMED' | 'PENDING' | 'REJECTED' = 'PENDING';
+        let txId: string | null = null;
+        let claimedAt: string | null = null;
+        let notes: string | null = null;
+
+        if (!isVerified && !isPending) {
+          ledgerStatus = 'REJECTED';
+          notes = visit.verification_notes || 'Visit failed verification criteria (human challenge or dwell time)';
+        } else if (isPending) {
+          ledgerStatus = 'PENDING';
+          notes = 'Visit in progress or awaiting active verification';
+        } else if (existingTx) {
+          // Already credited to user balance on surf completion - record as settled
+          ledgerStatus = 'CLAIMED';
+          txId = existingTx.id;
+          claimedAt = existingTx.created_at || visit.completed_at || visit.created_at;
+          notes = 'Settled and credited to balance upon surf verification';
+        } else {
+          // Verified but not yet credited to user balance - eligible for collection
+          ledgerStatus = 'ELIGIBLE';
+          notes = 'Verified visit dwell eligible for collection';
+        }
+
+        const visitDate = new Date(visit.created_at || Date.now());
+        const visitMonth = visitDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
         try {
           insertStmt.run(
@@ -72,18 +111,383 @@ export class RewardService {
             visit.id,
             amountInr,
             creditsEarned,
-            visit.completed_at || visit.created_at || new Date().toISOString()
+            pointsEarned,
+            visitMonth,
+            ledgerStatus,
+            txId,
+            notes,
+            visit.created_at || new Date().toISOString(),
+            claimedAt
           );
+
+          if (ledgerStatus === 'CLAIMED') {
+            db.prepare('UPDATE users SET points = points + ?, total_earned_points = total_earned_points + ? WHERE id = ?')
+              .run(pointsEarned, pointsEarned, userId);
+          }
         } catch (insertErr: any) {
-          // Ignore unique constraint collision safely
           if (!insertErr?.message?.includes('UNIQUE')) {
-            console.warn('[RewardService] Error recording eligible visit:', insertErr);
+            console.warn('[RewardService] Error recording ledger visit:', insertErr);
           }
         }
       }
     } catch (err) {
       console.error('[RewardService] Failed to sync eligible rewards:', err);
     }
+  }
+
+  /**
+   * Calculates dynamic monthly points metrics according to the number of days
+   * in the current month, elapsed calendar days, and actual persisted qualifying points.
+   */
+  static getMonthlyPointsMetrics(userId?: string): MonthlyPointsMetrics {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    // Dynamic days in active month: 28/29 for Feb, 30 for Sep/Apr/Jun/Nov, 31 for Jan/Mar/May/Jul/Aug/Oct/Dec
+    const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
+    const currentDay = now.getDate();
+    const elapsedDays = Math.max(1, currentDay);
+    const remainingDays = Math.max(0, daysInCurrentMonth - currentDay);
+    const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const monthlyTarget = 450000;
+    // Dynamic daily target: monthlyTarget / daysInCurrentMonth
+    const dailyTarget = Number((monthlyTarget / daysInCurrentMonth).toFixed(2));
+
+    let currentPoints = 0;
+    let todayPoints = 0;
+    let thisWeekPoints = 0;
+    let currentMonthPoints = 0;
+    let qualifyingEventsCount = 0;
+
+    if (userId) {
+      // 1. Current user points from users table
+      const userRow = db.prepare('SELECT points FROM users WHERE id = ?').get(userId) as any;
+      if (userRow && typeof userRow.points === 'number') {
+        currentPoints = Number(userRow.points);
+      }
+
+      // 2. Current-month points from reward_ledger
+      const currentMonthStart = new Date(year, month, 1, 0, 0, 0).toISOString();
+      const currentMonthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999).toISOString();
+
+      const monthRow = db.prepare(`
+        SELECT COALESCE(SUM(points), 0) as month_points, COUNT(*) as count
+        FROM reward_ledger
+        WHERE user_id = ?
+          AND created_at >= ?
+          AND created_at <= ?
+          AND status IN ('ELIGIBLE', 'CLAIMED')
+      `).get(userId, currentMonthStart, currentMonthEnd) as any;
+
+      currentMonthPoints = Number(monthRow?.month_points || 0);
+      qualifyingEventsCount = Number(monthRow?.count || 0);
+
+      // Reconcile total points if users.points was 0 but ledger has records
+      if (currentPoints === 0 && currentMonthPoints > 0) {
+        const totalLedger = db.prepare(`
+          SELECT COALESCE(SUM(points), 0) as total_pts
+          FROM reward_ledger
+          WHERE user_id = ? AND status IN ('ELIGIBLE', 'CLAIMED')
+        `).get(userId) as any;
+        currentPoints = Number(totalLedger?.total_pts || currentMonthPoints);
+        db.prepare('UPDATE users SET points = ?, total_earned_points = ? WHERE id = ?').run(currentPoints, currentPoints, userId);
+      }
+
+      // 3. Today's points
+      const startOfToday = new Date(year, month, currentDay, 0, 0, 0).toISOString();
+      const todayRow = db.prepare(`
+        SELECT COALESCE(SUM(points), 0) as today_points
+        FROM reward_ledger
+        WHERE user_id = ?
+          AND created_at >= ?
+          AND status IN ('ELIGIBLE', 'CLAIMED')
+      `).get(userId, startOfToday) as any;
+      todayPoints = Number(todayRow?.today_points || 0);
+
+      // 4. This week's points (starting from start of week)
+      const dayOfWeek = now.getDay();
+      const startOfWeekDate = new Date(year, month, currentDay - dayOfWeek, 0, 0, 0);
+      const startOfWeek = startOfWeekDate.toISOString();
+      const weekRow = db.prepare(`
+        SELECT COALESCE(SUM(points), 0) as week_points
+        FROM reward_ledger
+        WHERE user_id = ?
+          AND created_at >= ?
+          AND status IN ('ELIGIBLE', 'CLAIMED')
+      `).get(userId, startOfWeek) as any;
+      thisWeekPoints = Number(weekRow?.week_points || 0);
+    }
+
+    // Daily average based on elapsed calendar days in the current month
+    // Handle zero qualifying days/points safely
+    const dailyAverage = currentMonthPoints > 0 ? Number((currentMonthPoints / elapsedDays).toFixed(2)) : 0;
+
+    // Projected monthly points: (current qualifying points / elapsed days) * days in current month
+    // Projection is an extrapolation based on elapsed calendar days and persisted qualifying activity.
+    // It is never treated as earned points.
+    const projectedMonthlyPoints = currentMonthPoints > 0 ? Math.round((currentMonthPoints / elapsedDays) * daysInCurrentMonth) : 0;
+
+    // Remaining points to achieve 450K target
+    const remainingPoints = Math.max(0, monthlyTarget - currentMonthPoints);
+
+    // Target progress percentage: (current qualifying points / monthlyTarget) * 100
+    const targetProgress = Number(((currentMonthPoints / monthlyTarget) * 100).toFixed(4));
+
+    // Structured log: [REWARD_SUMMARY]
+    console.log(`[REWARD_SUMMARY]\nuserId: ${userId || 'anonymous'}\nmonth: ${monthLabel}\ncurrentMonthPoints: ${currentMonthPoints}\nmonthlyTarget: ${monthlyTarget}\nprojectedMonthlyPoints: ${projectedMonthlyPoints}`);
+
+    return {
+      monthlyTarget,
+      dailyTarget,
+      daysInCurrentMonth,
+      elapsedDays,
+      remainingDays,
+      currentPoints,
+      todayPoints,
+      thisWeekPoints,
+      weekPoints: thisWeekPoints,
+      currentMonthPoints,
+      dailyAverage,
+      projectedMonthlyPoints,
+      remainingPoints,
+      targetProgress,
+      targetProgressPercentage: targetProgress,
+      monthLabel,
+      qualifyingEventsCount
+    };
+  }
+
+  /**
+   * Processes legitimate user activity, qualifies the event server-side,
+   * calculates deterministic points, records atomically in reward_ledger,
+   * and outputs required structured audit logs.
+   */
+  static processUserActivity(
+    userId: string,
+    sessionId: string | undefined,
+    payload: ActivityEventPayload,
+    clientIp?: string,
+    userAgent?: string
+  ): ActivityEventResult {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+    if (!user) {
+      throw new Error('User not found');
+    }
+    if (user.status === 'suspended') {
+      throw new Error('This account is suspended from earning rewards');
+    }
+
+    const eventType = String(payload.eventType || 'feature_exploration');
+    const feature = String(payload.feature || 'general');
+    const path = payload.path ? String(payload.path) : undefined;
+    const metadataJson = payload.metadata ? JSON.stringify(payload.metadata) : null;
+    const eventId = payload.eventId || `evt-${crypto.randomUUID()}`;
+    const nowIso = new Date().toISOString();
+
+    // 1. Structured log: [REWARD_ACTIVITY_RECEIVED]
+    console.log(`[REWARD_ACTIVITY_RECEIVED]\nuserId: ${userId}\nsessionId: ${sessionId || 'none'}\neventId: ${eventId}\neventType: ${eventType}`);
+
+    // Anti-replay / Duplicate check (atomic database uniqueness guarantee)
+    const existingEvent = db.prepare('SELECT id FROM user_activity_events WHERE id = ?').get(eventId);
+    const existingLedger = db.prepare('SELECT id FROM reward_ledger WHERE qualifying_event_id = ?').get(eventId);
+
+    if (existingEvent || existingLedger) {
+      console.log(`[REWARD_DUPLICATE]\neventId: ${eventId}`);
+      const duplicateReason = 'duplicate_event_already_processed';
+      console.log(`[REWARD_QUALIFICATION]\neventId: ${eventId}\nqualified: false\nreason: ${duplicateReason}`);
+      console.log(`[REWARD_CALCULATION]\neventId: ${eventId}\npoints: 0`);
+      console.log(`[REWARD_REJECTED]\neventId: ${eventId}\nreason: ${duplicateReason}`);
+
+      const monthlyPoints = this.getMonthlyPointsMetrics(userId);
+      return {
+        success: true,
+        eventId,
+        qualified: false,
+        qualificationStatus: 'REJECTED',
+        qualificationReason: duplicateReason,
+        pointsAwarded: 0,
+        pointsTotal: Number(user.points || 0),
+        monthlyPoints
+      };
+    }
+
+    // 2. Server-side Qualification Logic with Explicit States: PENDING, QUALIFIED, REJECTED, EXPIRED
+    let qualificationStatus: 'PENDING' | 'QUALIFIED' | 'REJECTED' | 'EXPIRED' = 'QUALIFIED';
+    let qualificationReason = 'verified_authentic_feature_exploration';
+
+    const lowerType = eventType.toLowerCase().trim();
+    const lowerFeature = feature.toLowerCase().trim();
+    const lowerPath = (path || '').toLowerCase().trim();
+
+    // Strict filter: Reject background polling, dashboard refreshes, auto-refresh, synthetic traffic, fake analytics
+    const disqualifiedKeywords = [
+      'poll', 'polling', 'refresh', 'auto_refresh', 'synthetic', 'bot',
+      'fake', 'automated_ping', 'heartbeat', 'metrics_poll', 'pageview', 'ping'
+    ];
+    const isDisqualifiedPattern = disqualifiedKeywords.some(kw =>
+      lowerType.includes(kw) || lowerFeature.includes(kw) || lowerPath.includes(kw)
+    );
+
+    if (isDisqualifiedPattern) {
+      qualificationStatus = 'REJECTED';
+      qualificationReason = 'rejected_background_polling_or_synthetic_traffic';
+    } else if (eventType === 'feature_exploration') {
+      // Cooldown check: 15 second cooldown per distinct feature
+      const fifteenSecsAgo = new Date(Date.now() - 15 * 1000).toISOString();
+      const recentFeature = db.prepare(`
+        SELECT id FROM user_activity_events
+        WHERE user_id = ? AND event_type = 'feature_exploration' AND feature = ? 
+          AND (qualification_status = 'QUALIFIED' OR qualified = 1) 
+          AND created_at >= ?
+        LIMIT 1
+      `).get(userId, feature, fifteenSecsAgo);
+
+      if (recentFeature) {
+        qualificationStatus = 'REJECTED';
+        qualificationReason = 'cooldown_active_feature_throttled';
+      }
+
+      // Daily limit: max 120 exploration events per user per day
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayCount = (db.prepare(`
+        SELECT COUNT(*) as c FROM user_activity_events
+        WHERE user_id = ? AND event_type = 'feature_exploration' 
+          AND (qualification_status = 'QUALIFIED' OR qualified = 1) 
+          AND created_at >= ?
+      `).get(userId, todayStart.toISOString()) as any)?.c || 0;
+
+      if (todayCount >= 120) {
+        qualificationStatus = 'REJECTED';
+        qualificationReason = 'daily_exploration_limit_reached';
+      }
+    }
+
+    const qualified = qualificationStatus === 'QUALIFIED';
+
+    // Structured log: [REWARD_QUALIFICATION]
+    console.log(`[REWARD_QUALIFICATION]\neventId: ${eventId}\nqualified: ${qualified}\nreason: ${qualificationReason}`);
+
+    let pointsCalculated = 0;
+    let pointsBefore = Number(user.points || 0);
+    let pointsAdded = 0;
+    let pointsAfter = pointsBefore;
+    const processedAt = new Date().toISOString();
+
+    if (qualified) {
+      // 3. Deterministic Points Calculation
+      if (eventType === 'surf_dwell_verified') {
+        pointsCalculated = 75;
+      } else if (eventType === 'tri_station_rotation') {
+        pointsCalculated = 150;
+      } else if (eventType === 'campaign_management') {
+        pointsCalculated = 50;
+      } else if (eventType === 'security_audit') {
+        pointsCalculated = 35;
+      } else {
+        // Legitimate feature exploration
+        pointsCalculated = 25;
+      }
+    }
+
+    // Structured log: [REWARD_CALCULATION]
+    console.log(`[REWARD_CALCULATION]\neventId: ${eventId}\npoints: ${pointsCalculated}`);
+
+    if (!qualified) {
+      // Structured log: [REWARD_REJECTED]
+      console.log(`[REWARD_REJECTED]\neventId: ${eventId}\nreason: ${qualificationReason}`);
+
+      // Persist rejected event without creating any reward ledger entry
+      try {
+        db.prepare(`
+          INSERT INTO user_activity_events (
+            id, user_id, session_id, event_type, feature, path, metadata_json,
+            ip_address, user_agent, qualified, qualification_status, qualification_reason,
+            points_calculated, points_awarded, processed_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'REJECTED', ?, 0, 0, ?, ?)
+        `).run(
+          eventId, userId, sessionId || null, eventType, feature, path || null, metadataJson,
+          clientIp || '127.0.0.1', userAgent || 'TrafficLoop Explorer', qualificationReason,
+          processedAt, nowIso
+        );
+      } catch {
+        // Ignore duplicate ID error for audit log
+      }
+    } else {
+      // 4. Atomic Ledger & Event Persistence (idempotent with UNIQUE(qualifying_event_id))
+      // Only QUALIFIED activity can create a reward ledger entry
+      pointsAdded = pointsCalculated;
+      pointsAfter = pointsBefore + pointsAdded;
+
+      const ledgerId = `rw-${crypto.randomUUID()}`;
+      const amountCredits = Number((pointsAdded / 100).toFixed(2));
+      const inrVal = CurrencyConversionService.calculateCreditValue(amountCredits, 'INR');
+      const amountInr = inrVal.inrValue;
+      const txId = `tx-pt-${crypto.randomUUID()}`;
+      const now = new Date();
+      const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      try {
+        db.exec('BEGIN IMMEDIATE');
+
+        // Persist qualified activity event
+        db.prepare(`
+          INSERT INTO user_activity_events (
+            id, user_id, session_id, event_type, feature, path, metadata_json,
+            ip_address, user_agent, qualified, qualification_status, qualification_reason,
+            points_calculated, points_awarded, processed_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'QUALIFIED', ?, ?, ?, ?, ?)
+        `).run(
+          eventId, userId, sessionId || null, eventType, feature, path || null, metadataJson,
+          clientIp || '127.0.0.1', userAgent || 'TrafficLoop Explorer', qualificationReason,
+          pointsCalculated, pointsAdded, processedAt, nowIso
+        );
+
+        // Record in reward_ledger
+        db.prepare(`
+          INSERT INTO reward_ledger (
+            id, user_id, eligibility_source, qualifying_event_id,
+            amount_inr, amount_credits, points, month, status, transaction_id, notes, created_at, claimed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED', ?, ?, ?, ?)
+        `).run(
+          ledgerId, userId, eventType, eventId, amountInr, amountCredits, pointsAdded, monthLabel,
+          txId, `Awarded for ${eventType} (${feature})`, nowIso, nowIso
+        );
+
+        // Update user account points balance
+        db.prepare(`
+          UPDATE users 
+          SET points = points + ?, 
+              total_earned_points = total_earned_points + ?,
+              last_active_at = ?
+          WHERE id = ?
+        `).run(pointsAdded, pointsAdded, processedAt, userId);
+
+        db.exec('COMMIT');
+      } catch (err: any) {
+        db.exec('ROLLBACK');
+        console.error('[RewardService.processUserActivity] Transaction failed:', err);
+        throw err;
+      }
+
+      // Structured log: [REWARD_LEDGER]
+      console.log(`[REWARD_LEDGER]\neventId: ${eventId}\nuserId: ${userId}\npointsBefore: ${pointsBefore}\npointsAdded: ${pointsAdded}\npointsAfter: ${pointsAfter}`);
+    }
+
+    // 5. Monthly Aggregation Metrics
+    const monthlyPoints = this.getMonthlyPointsMetrics(userId);
+
+    return {
+      success: true,
+      eventId,
+      qualified,
+      qualificationStatus,
+      qualificationReason,
+      pointsAwarded: pointsAdded,
+      pointsTotal: pointsAfter,
+      monthlyPoints
+    };
   }
 
   /**
@@ -220,8 +624,11 @@ export class RewardService {
       rewardClaims: rewardClaimsCount
     };
 
+    const monthlyPoints = this.getMonthlyPointsMetrics(userId);
+
     return {
       indiaCampaign,
+      monthlyPoints,
       userRewards,
       analytics,
       isAuthenticated: Boolean(userId),

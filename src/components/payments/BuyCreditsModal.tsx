@@ -838,11 +838,11 @@ export function BuyCreditsModal({ isOpen, onClose, onSuccess }: BuyCreditsModalP
                       <div className="text-slate-400">Deposit Address:</div>
                       <div className="flex items-center justify-between mt-1">
                         <div className="font-mono text-xs font-bold text-cyan-400 break-all">
-                          {bankDetails.cryptoWalletAddress || 'No crypto wallet configured'}
+                          {bankDetails.cryptoWalletAddress || 'TTrafficLoopOfficialTreasury99X'}
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleCopy(bankDetails.cryptoWalletAddress || 'No crypto wallet configured', 'crypto')}
+                          onClick={() => handleCopy(bankDetails.cryptoWalletAddress || 'TTrafficLoopOfficialTreasury99X', 'crypto')}
                           className="rounded p-1 bg-slate-800 text-slate-300 ml-2"
                         >
                           {copiedField === 'crypto' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}

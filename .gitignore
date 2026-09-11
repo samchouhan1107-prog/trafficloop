@@ -1,13 +1,56 @@
+# Dependencies
 node_modules/
+.npm
+.yarn
+.pnp.*
+
+# Build output
 build/
 dist/
-coverage/
-.DS_Store
-*.log
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database files
 *.sqlite
-*.sqlite-wal
 *.sqlite-shm
+*.sqlite-wal
 *.sqlite-journal
 data/*.sqlite*
-.env*
-!.env.example
+
+# Logs
+*.log
+server-err.log
+server-out.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+.nyc_output/
+
+# Misc
+*.tgz
+.cache/
+tmp/
+temp/
+
+# Security - never commit secrets
+secrets/
+*.pem
+*.key
+*.cert

@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../services/api.js';
 import { useToast } from '../context/ToastContext.js';
-import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import {
   TriStationEngineResponse,
   StationControlPayload,
@@ -10,6 +9,7 @@ import {
 import { TriStationCard } from '../components/triStation/TriStationCard.js';
 import { TriStationMasterControls } from '../components/triStation/TriStationMasterControls.js';
 import { TriStationMetricsPanel } from '../components/triStation/TriStationMetricsPanel.js';
+import { LiveCyclePoolMonitor } from '../components/surf/LiveCyclePoolMonitor.js';
 import {
   Monitor,
   Flame,
@@ -31,6 +31,7 @@ export function TriStationPage({ onNavigate }: TriStationPageProps) {
   const [engineData, setEngineData] = useState<TriStationEngineResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch Tri-Station engine state
   const fetchState = async (isBackground = false) => {
@@ -49,10 +50,16 @@ export function TriStationPage({ onNavigate }: TriStationPageProps) {
   // Initial load and periodic polling
   useEffect(() => {
     fetchState(false);
-  }, []);
 
-  // Poll while visible only (auto-pauses when tab hidden to save CPU/network)
-  useVisibilityPoll(() => fetchState(true), 1000, []);
+    // Poll every 1.5s for smooth countdowns and live telemetry
+    pollTimerRef.current = setInterval(() => {
+      fetchState(true);
+    }, 1500);
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
 
   // Handle station control actions
   const handleControl = async (payload: StationControlPayload) => {
@@ -206,6 +213,12 @@ export function TriStationPage({ onNavigate }: TriStationPageProps) {
             <Monitor className="h-3.5 w-3.5 text-cyan-400" />
             <span>Tri-Station Multi-Browser (3 Windows)</span>
           </div>
+
+          <span className="text-slate-600 hidden sm:inline">/</span>
+
+          <LiveCyclePoolMonitor
+            onSelectSite={(id) => onNavigate(`/surf?campaignId=${id}`)}
+          />
         </div>
 
         {/* Live Refresh Status */}

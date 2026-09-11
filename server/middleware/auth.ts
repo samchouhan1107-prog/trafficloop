@@ -6,6 +6,7 @@ import { CurrencyConversionService } from '../services/currencyConversionService
 export interface AuthenticatedRequest extends Request {
   user?: User;
   sessionToken?: string;
+  sessionId?: string;
 }
 
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
@@ -27,7 +28,8 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   // Lookup active session
   const session = db.prepare(`
     SELECT s.*, u.id, u.email, u.name, u.role, u.location, u.preferred_currency, u.credits, u.total_earned_credits, 
-           u.total_spent_credits, u.total_visits_made, u.total_visits_received, u.status, u.created_at, u.last_login_at
+           u.total_spent_credits, u.total_visits_made, u.total_visits_received, u.status, u.created_at, u.last_login_at,
+           u.last_active_at, u.inactivity_reason
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ? AND s.expires_at > ?
@@ -41,6 +43,24 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   if (session.status === 'suspended') {
     res.status(403).json({ error: 'Your account has been suspended by administration.' });
     return;
+  }
+
+  // Automatic sliding window session renewal if within 14 days of expiration
+  try {
+    const expiresAtTime = new Date(session.expires_at).getTime();
+    const nowTime = Date.now();
+    const fourteenDaysMs = 14 * 86400000;
+    if (expiresAtTime - nowTime < fourteenDaysMs) {
+      const renewedExpiresAt = new Date(nowTime + 30 * 86400000).toISOString();
+      const renewedAt = new Date(nowTime).toISOString();
+      db.prepare(`
+        UPDATE sessions
+        SET expires_at = ?, last_renewed_at = ?
+        WHERE token = ?
+      `).run(renewedExpiresAt, renewedAt, token);
+    }
+  } catch (renewErr) {
+    // Non-blocking
   }
 
   const credits = Number(session.credits);
@@ -62,11 +82,14 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
     total_visits_made: session.total_visits_made,
     total_visits_received: session.total_visits_received,
     status: session.status,
+    last_active_at: session.last_active_at,
+    inactivity_reason: session.inactivity_reason,
     created_at: session.created_at,
     last_login_at: session.last_login_at
   };
 
   req.sessionToken = token;
+  req.sessionId = token;
   next();
 }
 
@@ -117,6 +140,7 @@ export function optionalAuthMiddleware(req: AuthenticatedRequest, _res: Response
         last_login_at: session.last_login_at
       };
       req.sessionToken = token;
+      req.sessionId = token;
     }
   } catch {}
 

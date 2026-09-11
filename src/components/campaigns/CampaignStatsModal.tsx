@@ -87,6 +87,37 @@ export function CampaignStatsModal({ campaignId, isOpen, onClose }: CampaignStat
             </div>
           </div>
 
+          {/* Rotated Destination URLs if multiple */}
+          {data.campaign?.urls && data.campaign.urls.length > 1 && (
+            <div className="rounded-xl border border-indigo-800/60 bg-indigo-950/30 p-3.5 space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-indigo-300">
+                <span className="flex items-center gap-1.5">
+                  <Globe className="h-4 w-4 text-indigo-400" />
+                  <span>Destination URL Rotation Pool ({data.campaign.urls.length} URLs)</span>
+                </span>
+                <span className="rounded bg-indigo-900/80 px-2 py-0.5 text-[10px] text-indigo-200 border border-indigo-700/60">
+                  Next URL: #{((data.campaign.url_cursor || 0) % data.campaign.urls.length) + 1}
+                </span>
+              </div>
+              <div className="space-y-1 font-mono text-[11px]">
+                {data.campaign.urls.map((u: string, i: number) => {
+                  const isNext = i === ((data.campaign.url_cursor || 0) % data.campaign.urls.length);
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center justify-between rounded px-2 py-1 ${
+                        isNext ? 'bg-indigo-900/60 border border-indigo-700/80 text-white font-semibold' : 'bg-slate-900/50 text-slate-400'
+                      }`}
+                    >
+                      <span className="truncate max-w-[420px]">{i + 1}. {u}</span>
+                      {isNext && <span className="text-[10px] text-cyan-300 font-sans font-bold">NEXT UP</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Automated Safety Review Card */}
           {data.review && (
             <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
@@ -132,35 +163,47 @@ export function CampaignStatsModal({ campaignId, isOpen, onClose }: CampaignStat
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-800 bg-slate-900/60 text-slate-400">
                     <tr>
-                      <th className="px-4 py-2.5 font-semibold">Timestamp</th>
-                      <th className="px-4 py-2.5 font-semibold">Visitor</th>
-                      <th className="px-4 py-2.5 font-semibold">Dwell Duration</th>
-                      <th className="px-4 py-2.5 font-semibold">Credits Charged</th>
-                      <th className="px-4 py-2.5 font-semibold">Status</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Timestamp</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Destination URL</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Visitor & Country</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Dwell Time</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Charged</th>
+                      <th className="px-3.5 py-2.5 font-semibold">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-slate-300">
                     {data.recent_visits.map((v: any) => (
                       <tr key={v.id} className="hover:bg-slate-900/40">
-                        <td className="px-4 py-2.5 font-mono text-[11px] text-slate-400">
-                          {new Date(v.created_at).toLocaleString()}
+                        <td className="px-3.5 py-2.5 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </td>
-                        <td className="px-4 py-2.5 font-medium text-white">
-                          {v.visitor_name || 'Network Surfer'}
+                        <td className="px-3.5 py-2.5 font-mono text-[11px] text-cyan-300 truncate max-w-[200px]" title={v.target_url || data.campaign?.url}>
+                          {v.target_url || data.campaign?.url}
                         </td>
-                        <td className="px-4 py-2.5 font-semibold text-cyan-300">
+                        <td className="px-3.5 py-2.5 whitespace-nowrap">
+                          <div className="font-medium text-white flex items-center gap-1.5">
+                            <span>{v.visitor_name || 'Verified Surfer'}</span>
+                            {v.visitor_country && (
+                              <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 border border-slate-700">
+                                {v.visitor_country_code ? `${v.visitor_country_code} ` : ''}{v.visitor_country}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-2.5 font-semibold text-cyan-300 whitespace-nowrap">
                           {v.actual_dwell_seconds || v.duration_seconds}s
                         </td>
-                        <td className="px-4 py-2.5 font-semibold text-amber-400">
+                        <td className="px-3.5 py-2.5 font-semibold text-amber-400 whitespace-nowrap">
                           -{Number(v.credits_charged).toFixed(2)} CR
                         </td>
-                        <td className="px-4 py-2.5">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        <td className="px-3.5 py-2.5 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold ${
                             v.status === 'completed'
                               ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
                               : 'bg-slate-800 text-slate-400'
                           }`}>
-                            {v.status === 'completed' ? 'Verified' : v.status}
+                            <span>{v.status === 'completed' ? 'Verified' : v.status}</span>
+                            {v.http_status && <span className="text-[9px] opacity-75">({v.http_status})</span>}
                           </span>
                         </td>
                       </tr>

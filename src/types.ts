@@ -5,7 +5,8 @@ export type CampaignStatus =
   | 'active' 
   | 'paused' 
   | 'completed' 
-  | 'rejected';
+  | 'rejected'
+  | 'test';
 
 export type TransactionType = 
   | 'visit_reward' 
@@ -18,6 +19,26 @@ export type TransactionType =
 
 export type VisitStatus = 'started' | 'completed' | 'abandoned' | 'invalidated';
 
+export type NotificationType = 
+  | 'campaign_status' 
+  | 'campaign_upgrade' 
+  | 'user_inactivity' 
+  | 'user_reactivated' 
+  | 'system' 
+  | 'credit';
+
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  link?: string | null;
+  read: boolean;
+  metadata?: Record<string, any>;
+  created_at: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -27,12 +48,16 @@ export interface User {
   credits: number;
   total_earned_credits: number;
   total_spent_credits: number;
+  points?: number;
+  total_earned_points?: number;
   total_visits_made: number;
   total_visits_received: number;
   preferred_currency?: 'INR' | 'USD' | 'BWP' | 'EUR' | 'GBP';
   inr_equivalent_balance?: number;
   formatted_inr_balance?: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'inactive' | 'suspended';
+  last_active_at?: string;
+  inactivity_reason?: string;
   created_at: string;
   last_login_at?: string;
 }
@@ -47,24 +72,89 @@ export interface Campaign {
   user_id: string;
   title: string;
   url: string;
+  urls?: string[];
+  urls_json?: string | null;
+  url_cursor?: number;
+  country_cursor?: number;
+  failed_visits_count?: number;
+  last_dispatched_at?: string | null;
+  next_dispatch_at?: string | null;
+  auto_progress?: boolean;
   duration_seconds: number;
   credit_cost_per_visit: number;
   credit_budget: number;
   spent_credits: number;
   total_visits_received: number;
+  total_clicks_received?: number;
+  interactive_clicks_enabled?: boolean;
   status: CampaignStatus;
   category: string;
   daily_visit_limit: number;
   today_visits_received: number;
-  bonus_visit_limit?: number;
-  bonus_visits_delivered?: number;
   target_locations?: string;
   device_targeting?: string;
+  tier?: string;
+  ga4_measurement_id?: string | null;
+  ga4_api_secret?: string | null;
   rejection_reason?: string;
   created_at: string;
   updated_at: string;
   user_name?: string;
   user_email?: string;
+}
+
+export interface GA4TagScanResult {
+  url: string;
+  isReachable: boolean;
+  httpStatus?: number;
+  detectedMeasurementId: string | null;
+  detectedGtmId: string | null;
+  detectedUniversalAnalyticsId: string | null;
+  hasGtagScript: boolean;
+  hasGtmScript: boolean;
+  hasDataLayer: boolean;
+  isSpaOrClientSide: boolean;
+  details: string[];
+  recommendations: string[];
+}
+
+export interface GA4TestPingResult {
+  success: boolean;
+  measurementId: string;
+  httpStatus: number;
+  statusText: string;
+  clientId: string;
+  sessionId: string;
+  timestamp: string;
+  geoSummary: string;
+  targetUrl: string;
+  url?: string;
+  countryCode?: string;
+  endpointUsed: string;
+  parametersSent: Record<string, string>;
+  details: string;
+  realtimeGuide: string;
+}
+
+export interface GA4DeliveryLog {
+  id: string;
+  user_id: string;
+  campaign_id?: string | null;
+  target_url: string;
+  measurement_id?: string | null;
+  client_id: string;
+  session_id: string;
+  event_name: string;
+  country_name?: string | null;
+  country_code?: string | null;
+  city?: string | null;
+  geo_ip?: string | null;
+  http_status: number;
+  status: string;
+  delivery_status?: string;
+  details?: string | null;
+  source: string;
+  created_at: string;
 }
 
 export interface CampaignReview {
@@ -101,6 +191,9 @@ export interface Visit {
   credits_earned: number;
   credits_charged: number;
   status: VisitStatus;
+  target_url?: string;
+  http_status?: number;
+  error_message?: string;
   ip_address?: string;
   user_agent?: string;
   visitor_country?: string;
@@ -285,10 +378,14 @@ export interface SurfSessionPayload {
     category: string;
     is_network_showcase?: boolean;
     preview_mode?: boolean;
+    is_fallback?: boolean;
+    canEmbedInIframe?: boolean;
+    interactive_clicks_enabled?: boolean;
+    total_clicks_received?: number;
   };
   server_timestamp: number;
-  required_dwell_seconds: number;
-  next_campaign_due_seconds?: number;
+  clicks_registered?: number;
+  click_bonus_rate?: number;
   verification_challenge: {
     prompt: string;
     target_id: string;
@@ -305,6 +402,16 @@ export interface SurfSessionPayload {
   };
 }
 
+export interface RegisterClickResult {
+  success: boolean;
+  clicksCount: number;
+  bonusCredits: number;
+  totalCreditsEarned: number;
+  message: string;
+  ga4Tracked: boolean;
+  details?: string;
+}
+
 export interface SurfCompleteResult {
   success: boolean;
   creditsEarned: number;
@@ -313,6 +420,8 @@ export interface SurfCompleteResult {
   message: string;
   streakCount: number;
   streakBonus: number;
+  clicksCount?: number;
+  clickBonusEarned?: number;
   mysteryReward?: {
     unlocked: boolean;
     amount: number;
@@ -321,8 +430,8 @@ export interface SurfCompleteResult {
     message: string;
   };
   exchangeRatio: string;
-  dwellVerifiedSeconds: number;
-  requiredDwellSeconds: number;
+  visitId?: string;
+  dwellSeconds?: number;
 }
 
 export interface SurfEngineDiagnostics {
@@ -1178,11 +1287,51 @@ export interface RewardLedgerEntry {
   qualifying_event_id: string;
   amount_inr: number;
   amount_credits: number;
+  points?: number;
   status: RewardStatus;
   transaction_id?: string | null;
   notes?: string | null;
   created_at: string;
   claimed_at?: string | null;
+}
+
+export interface MonthlyPointsMetrics {
+  monthlyTarget: number; // 450,000 monthly points target
+  dailyTarget: number; // monthlyTarget / daysInCurrentMonth
+  daysInCurrentMonth: number; // dynamic count (e.g. 28, 29, 30, 31)
+  elapsedDays: number; // elapsed days in current month (min 1)
+  remainingDays: number; // remaining calendar days in month
+  currentPoints: number; // user total persisted points
+  todayPoints: number; // points earned today
+  thisWeekPoints: number; // points earned this week
+  weekPoints?: number; // alias for week points
+  currentMonthPoints: number; // points earned in the current calendar month
+  dailyAverage: number; // currentMonthPoints / elapsedDays
+  projectedMonthlyPoints: number; // (currentMonthPoints / elapsedDays) * daysInCurrentMonth
+  remainingPoints: number; // Math.max(0, monthlyTarget - currentMonthPoints)
+  targetProgress?: number; // alias for targetProgressPercentage
+  targetProgressPercentage: number; // (currentMonthPoints / monthlyTarget) * 100
+  monthLabel: string; // e.g. 'September 2026'
+  qualifyingEventsCount: number;
+}
+
+export interface ActivityEventPayload {
+  eventType: string; // 'feature_exploration' | 'surf_dwell_verified' | 'tri_station_rotation' | 'campaign_management' | string
+  feature: string; // 'dashboard' | 'surf_arena' | 'tri_station' | 'campaigns' | 'analytics' | 'seo_directory' | 'rewards_hub' | 'profile' | string
+  path?: string;
+  metadata?: Record<string, any>;
+  eventId?: string;
+}
+
+export interface ActivityEventResult {
+  success: boolean;
+  eventId: string;
+  qualified: boolean;
+  qualificationStatus?: 'PENDING' | 'QUALIFIED' | 'REJECTED' | 'EXPIRED';
+  qualificationReason?: string;
+  pointsAwarded: number;
+  pointsTotal: number;
+  monthlyPoints: MonthlyPointsMetrics;
 }
 
 export interface IndiaCampaignStats {
@@ -1218,6 +1367,7 @@ export interface SeparatedAnalyticsMetrics {
 
 export interface RewardsSummaryResponse {
   indiaCampaign: IndiaCampaignStats;
+  monthlyPoints: MonthlyPointsMetrics;
   userRewards: UserRewardSummary | null;
   analytics: SeparatedAnalyticsMetrics;
   isAuthenticated: boolean;
@@ -1269,6 +1419,43 @@ export interface ClaimRewardResult {
   updatedUserCredits: number;
   updatedUserInr: number;
 }
+
+export interface CycleSite {
+  id: string;
+  campaignId: string;
+  url: string;
+  title: string;
+  status: string;
+  category: string;
+  duration: number;
+  creditReward: number;
+  weight: number;
+  available: boolean;
+  canEmbedInIframe: boolean;
+  isFallback?: boolean;
+}
+
+export interface TrafficStrengthTelemetry {
+  score: number;
+  activeSites: number;
+  eligibleSites: number;
+  qualifiedVisits: number;
+  verifiedVisits: number;
+  failedVisits: number;
+  totalExchanges: number;
+  poolVersion: number;
+  lastSync: string;
+}
+
+export interface CyclePoolResponse {
+  sites: CycleSite[];
+  total: number;
+  eligibleTotal: number;
+  poolVersion: number;
+  updatedAt: string;
+  trafficStrength: TrafficStrengthTelemetry;
+}
+
 
 
 

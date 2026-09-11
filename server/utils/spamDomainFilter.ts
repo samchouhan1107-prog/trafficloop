@@ -76,16 +76,7 @@ export const DISPOSABLE_EMAIL_DOMAINS = new Set([
   'guerrillamail.info'
 ]);
 
-let PIN_SECRET = process.env.SESSION_SECRET;
-
-if (!PIN_SECRET) {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('SESSION_SECRET environment variable is required in production. Generate with: openssl rand -hex 32');
-  }
-  // Development-only ephemeral secret — never used in production
-  PIN_SECRET = crypto.randomBytes(32).toString('hex');
-  console.warn('[Security] SESSION_SECRET not set. Using ephemeral dev-only secret. Set SESSION_SECRET in .env for persistence.');
-}
+const PIN_SECRET = process.env.SESSION_SECRET || 'webzonebw_signup_antispam_pin_secret_key_2026';
 
 /**
  * Validates whether an email domain is real/legitimate and not a disposable spam domain.

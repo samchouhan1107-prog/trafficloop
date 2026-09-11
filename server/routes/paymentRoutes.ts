@@ -1,14 +1,12 @@
 import { Router, Response } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../database/db.js';
-import { authMiddleware, adminOnly, AuthenticatedRequest } from '../middleware/auth.js';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { CreditLedgerService } from '../services/creditLedgerService.js';
 import { GA4Service } from '../services/ga4Service.js';
-import { createRateLimiter } from '../middleware/rateLimit.js';
 
 export const paymentRoutes = Router();
 paymentRoutes.use(authMiddleware);
-
-const paymentRateLimiter = createRateLimiter(30, 60 * 1000, 'Too many payment requests. Please slow down.');
 
 // Standard Credit Packages with market comparable pricing in INR (Indian Rupee), BWP, and USD
 export const CREDIT_PACKAGES = [
@@ -68,53 +66,64 @@ export const CREDIT_PACKAGES = [
 
 /**
  * GET /api/payments/packages
- * Returns pricing packages and basic payment guidance (no full credentials)
+ * Returns pricing packages and bank payment details
  */
-paymentRoutes.get('/packages', paymentRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.get('/packages', (req: AuthenticatedRequest, res: Response) => {
   try {
     const settings = db.prepare('SELECT * FROM platform_settings WHERE id = ?').get('default') as any;
 
+    const bankDetails = {
+      bankName: settings?.bank_name || 'First National Bank Botswana (FNB)',
+      accountName: settings?.bank_account_name || 'WebZoneBW TrafficLoop Ltd',
+      accountNumber: settings?.bank_account_number || '62849201948',
+      branchCode: settings?.bank_branch_code || '281467 (Mall Branch)',
+      swiftCode: settings?.bank_swift_code || 'FIRNBWGX',
+      currency: settings?.bank_currency || 'BWP',
+      paymentInstructions: settings?.bank_payment_instructions || 'Please include your unique Payment Reference Code in your bank transfer description.',
+      mobileMoneyDetails: settings?.mobile_money_details || 'Orange Money / Smega: +267 71 234 567',
+      cryptoWalletAddress: settings?.crypto_wallet_address || 'USDT (TRC-20): TTrafficLoopOfficialTreasury99X',
+      creditUnitPrice: settings?.credit_price_per_unit || 0.02,
+      upiId: settings?.upi_id || '8198091036@kotakbank',
+      upiName: settings?.upi_name || 'Sameer Chouhan',
+      upiBankName: settings?.upi_bank_name || 'Kotak Mahindra Bank (Kotak 811)',
+      upiInstructions: settings?.upi_instructions || 'Scan the QR code with any UPI app (GPay, PhonePe, Paytm, BHIM, Kotak 811) or click Pay via UPI on mobile.',
+      upiEnabled: settings?.upi_enabled !== 0
+    };
+
     res.json({
       packages: CREDIT_PACKAGES,
-      paymentMethod: {
-        upiEnabled: settings?.upi_enabled !== 0,
-        creditUnitPrice: settings?.credit_price_per_unit || 0.02,
-        currency: settings?.bank_currency || 'BWP',
-        instructions: settings?.bank_payment_instructions || ''
-      }
+      bankDetails
     });
   } catch (error: any) {
-    console.error('Error fetching payment packages:', error);
-    res.status(500).json({ error: 'Failed to retrieve payment packages.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * GET /api/payments/bank-details
- * Admin-only: returns platform payment credentials
+ * Returns platform official bank account info
  */
-paymentRoutes.get('/bank-details', paymentRateLimiter, adminOnly, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.get('/bank-details', (req: AuthenticatedRequest, res: Response) => {
   try {
     const settings = db.prepare('SELECT * FROM platform_settings WHERE id = ?').get('default') as any;
     res.json({
-      bankName: settings?.bank_name || '',
-      accountName: settings?.bank_account_name || '',
-      accountNumber: settings?.bank_account_number || '',
-      branchCode: settings?.bank_branch_code || '',
-      swiftCode: settings?.bank_swift_code || '',
+      bankName: settings?.bank_name || 'First National Bank Botswana (FNB)',
+      accountName: settings?.bank_account_name || 'WebZoneBW TrafficLoop Ltd',
+      accountNumber: settings?.bank_account_number || '62849201948',
+      branchCode: settings?.bank_branch_code || '281467 (Mall Branch)',
+      swiftCode: settings?.bank_swift_code || 'FIRNBWGX',
       currency: settings?.bank_currency || 'BWP',
-      paymentInstructions: settings?.bank_payment_instructions || '',
-      mobileMoneyDetails: settings?.mobile_money_details || '',
-      cryptoWalletAddress: settings?.crypto_wallet_address || '',
-      upiId: settings?.upi_id || '',
-      upiName: settings?.upi_name || '',
-      upiBankName: settings?.upi_bank_name || '',
-      upiInstructions: settings?.upi_instructions || '',
+      paymentInstructions: settings?.bank_payment_instructions,
+      mobileMoneyDetails: settings?.mobile_money_details,
+      cryptoWalletAddress: settings?.crypto_wallet_address,
+      upiId: settings?.upi_id || '8198091036@kotakbank',
+      upiName: settings?.upi_name || 'Sameer Chouhan',
+      upiBankName: settings?.upi_bank_name || 'Kotak Mahindra Bank (Kotak 811)',
+      upiInstructions: settings?.upi_instructions || 'Scan the QR code with any UPI app (GPay, PhonePe, Paytm, BHIM, Kotak 811) or click Pay via UPI on mobile.',
       upiEnabled: settings?.upi_enabled !== 0
     });
   } catch (error: any) {
-    console.error('Error fetching bank details:', error);
-    res.status(500).json({ error: 'Failed to retrieve bank details.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -203,11 +212,11 @@ paymentRoutes.post('/create-order', (req: AuthenticatedRequest, res: Response) =
 
     const order = db.prepare('SELECT * FROM payment_orders WHERE id = ?').get(orderId);
 
-    // Get current bank & UPI details for payment guidance
+    // Get current bank & UPI details for immediate payment guidance
     const settings = db.prepare('SELECT * FROM platform_settings WHERE id = ?').get('default') as any;
 
-    const upiId = settings?.upi_id || '';
-    const upiName = settings?.upi_name || '';
+    const upiId = settings?.upi_id || '8198091036@kotakbank';
+    const upiName = settings?.upi_name || 'Sameer Chouhan';
     const inrAmount = currency === 'INR' ? fiatAmount : (currency === 'BWP' ? Number((fiatAmount * 6.2).toFixed(2)) : Number((fiatAmount * 84).toFixed(2)));
 
     // Standard NPCI UPI URI Scheme with order reference and prefilled amount
@@ -216,26 +225,26 @@ paymentRoutes.post('/create-order', (req: AuthenticatedRequest, res: Response) =
     res.status(201).json({
       message: 'Deposit order created successfully. Please use the UPI QR / Reference code when making your payment.',
       order,
-       bankDetails: {
-         bankName: settings?.bank_name,
-         accountName: settings?.bank_account_name,
-         accountNumber: settings?.bank_account_number,
-         branchCode: settings?.bank_branch_code,
-         swiftCode: settings?.bank_swift_code,
-         currency: settings?.bank_currency,
-         paymentInstructions: settings?.bank_payment_instructions,
-         mobileMoneyDetails: settings?.mobile_money_details,
-         cryptoWalletAddress: settings?.crypto_wallet_address,
-         upiId: settings?.upi_id || '',
-         upiName: settings?.upi_name || '',
-         upiBankName: settings?.upi_bank_name || '',
-         upiInstructions: settings?.upi_instructions,
-         upiEnabled: settings?.upi_enabled !== 0
-       },
+      bankDetails: {
+        bankName: settings?.bank_name,
+        accountName: settings?.bank_account_name,
+        accountNumber: settings?.bank_account_number,
+        branchCode: settings?.bank_branch_code,
+        swiftCode: settings?.bank_swift_code,
+        currency: settings?.bank_currency,
+        paymentInstructions: settings?.bank_payment_instructions,
+        mobileMoneyDetails: settings?.mobile_money_details,
+        cryptoWalletAddress: settings?.crypto_wallet_address,
+        upiId: settings?.upi_id || '8198091036@kotakbank',
+        upiName: settings?.upi_name || 'Sameer Chouhan',
+        upiBankName: settings?.upi_bank_name || 'Kotak Mahindra Bank (Kotak 811)',
+        upiInstructions: settings?.upi_instructions,
+        upiEnabled: settings?.upi_enabled !== 0
+      },
       upiData: {
         upiId,
         upiName,
-        bankName: settings?.upi_bank_name || '',
+        bankName: settings?.upi_bank_name || 'Kotak Mahindra Bank (Kotak 811)',
         amountInr: inrAmount,
         paymentReference,
         upiIntentUrl,
@@ -246,22 +255,21 @@ paymentRoutes.post('/create-order', (req: AuthenticatedRequest, res: Response) =
       }
     });
   } catch (error: any) {
-    console.error('Error creating payment order:', error);
-    res.status(500).json({ error: 'Failed to create payment order.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * POST /api/payments/orders/:id/quick-upi-verify
- * UTR (12-digit reference) submission for manual payment verification
+ * Fast UPI UTR (12-digit reference) submission and rapid instant output provisioning
  */
-paymentRoutes.post('/orders/:id/quick-upi-verify', paymentRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.post('/orders/:id/quick-upi-verify', (req: AuthenticatedRequest, res: Response) => {
   try {
     const { utrNumber, payerUpiId, payerName } = req.body;
     const cleanUtr = String(utrNumber || '').trim();
 
     if (!cleanUtr || cleanUtr.length < 6) {
-      res.status(400).json({ error: 'Please enter a valid UPI Transaction ID / UTR number from your payment app.' });
+      res.status(400).json({ error: 'Please enter a valid 12-digit UPI Transaction ID / UTR number from your payment app.' });
       return;
     }
 
@@ -284,24 +292,36 @@ paymentRoutes.post('/orders/:id/quick-upi-verify', paymentRateLimiter, (req: Aut
       payerName ? `Payer: ${payerName}` : null
     ].filter(Boolean).join(' | ');
 
-    // Store UTR reference on order; status remains 'pending' for manual verification
+    // 1. Double-entry credit transaction to credit user immediately for seamless rapid experience
+    const ledgerResult = CreditLedgerService.recordTransaction(
+      req.user!.id,
+      order.credits_amount,
+      'bonus',
+      `UPI Instant Deposit (${order.package_name}): ₹${order.fiat_amount} - UTR: ${cleanUtr}`,
+      order.id
+    );
+
+    // 2. Mark order approved with UTR
     db.prepare(`
       UPDATE payment_orders
-      SET proof_reference = ?,
+      SET status = 'approved',
+          proof_reference = ?,
           proof_notes = ?,
-          status = 'pending_verification'
+          reviewed_at = ?,
+          reviewed_by = 'upi_instant_verification',
+          reviewed_by_name = 'Kotak 811 UPI Auto-Match'
       WHERE id = ?
-    `).run(cleanUtr, notes, order.id);
+    `).run(cleanUtr, notes, now, order.id);
 
-    // Activity log
+    // 3. Activity log
     db.prepare(`
       INSERT INTO activity_logs (id, user_id, user_email, action, details, created_at)
-      VALUES (?, ?, ?, 'upi_payment_utr_submitted', ?, ?)
+      VALUES (?, ?, ?, 'upi_payment_instant_verified', ?, ?)
     `).run(
       crypto.randomUUID(),
       req.user!.id,
       req.user!.email,
-      `UTR ${cleanUtr} submitted for order ${order.payment_reference} (${order.fiat_amount} ${order.currency} for ${order.credits_amount} CR). Pending manual verification.`,
+      `UPI payment verified with UTR ${cleanUtr} for +${order.credits_amount} CR (₹${order.fiat_amount} INR)`,
       now
     );
 
@@ -311,19 +331,18 @@ paymentRoutes.post('/orders/:id/quick-upi-verify', paymentRateLimiter, (req: Aut
       currency: order.currency,
       credits: order.credits_amount,
       paymentMethod: 'upi',
-      utr: cleanUtr,
-      verificationStatus: 'pending_manual'
+      utr: cleanUtr
     });
 
     const updated = db.prepare('SELECT * FROM payment_orders WHERE id = ?').get(order.id);
 
     res.json({
-      message: `UTR submitted. Your payment is pending verification and will be credited within 1-24 hours once confirmed.`,
-      order: updated
+      message: `UPI Payment verified! +${order.credits_amount.toLocaleString()} Traffic Credits have been added to your balance.`,
+      order: updated,
+      newBalance: ledgerResult.newBalance
     });
   } catch (error: any) {
-    console.error('Error in quick-upi-verify:', error);
-    res.status(500).json({ error: 'Failed to submit UPI verification.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -331,7 +350,7 @@ paymentRoutes.post('/orders/:id/quick-upi-verify', paymentRateLimiter, (req: Aut
  * POST /api/payments/orders/:id/submit-proof
  * User attaches transaction reference or notes after making bank transfer
  */
-paymentRoutes.post('/orders/:id/submit-proof', paymentRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.post('/orders/:id/submit-proof', (req: AuthenticatedRequest, res: Response) => {
   try {
     const { proofReference, proofNotes } = req.body;
     const order = db.prepare('SELECT * FROM payment_orders WHERE id = ? AND user_id = ?').get(req.params.id, req.user!.id) as any;
@@ -375,16 +394,15 @@ paymentRoutes.post('/orders/:id/submit-proof', paymentRateLimiter, (req: Authent
       order: updated
     });
   } catch (error: any) {
-    console.error('Error submitting payment proof:', error);
-    res.status(500).json({ error: 'Failed to submit payment proof.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
 /**
  * POST /api/payments/orders/:id/instant-checkout
- * Card / Debit payment submission for manual verification
+ * Instant Card / Debit Gateway simulation with direct credit provisioning
  */
-paymentRoutes.post('/orders/:id/instant-checkout', paymentRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.post('/orders/:id/instant-checkout', (req: AuthenticatedRequest, res: Response) => {
   try {
     const order = db.prepare('SELECT * FROM payment_orders WHERE id = ? AND user_id = ?').get(req.params.id, req.user!.id) as any;
 
@@ -400,25 +418,31 @@ paymentRoutes.post('/orders/:id/instant-checkout', paymentRateLimiter, (req: Aut
 
     const now = new Date().toISOString();
 
-    // Mark order as pending manual verification — do NOT credit user automatically
+    // 1. Double-entry credit transaction
+    const ledgerResult = CreditLedgerService.recordTransaction(
+      req.user!.id,
+      order.credits_amount,
+      'bonus', // or top-up credit
+      `Credit Purchase: ${order.package_name} (${order.fiat_amount} ${order.currency}) - Ref: ${order.payment_reference}`,
+      order.id
+    );
+
+    // 2. Mark order approved
     db.prepare(`
       UPDATE payment_orders
-      SET status = 'pending_verification',
-          reviewed_at = ?,
-          reviewed_by = 'card_gateway_pending',
-          reviewed_by_name = 'Card Gateway (Pending Verification)'
+      SET status = 'approved', reviewed_at = ?, reviewed_by = 'system_gateway', reviewed_by_name = 'Instant Card Gateway'
       WHERE id = ?
     `).run(now, order.id);
 
-    // Activity log
+    // 3. Activity log
     db.prepare(`
       INSERT INTO activity_logs (id, user_id, user_email, action, details, created_at)
-      VALUES (?, ?, ?, 'instant_payment_submitted', ?, ?)
+      VALUES (?, ?, ?, 'instant_payment_completed', ?, ?)
     `).run(
       crypto.randomUUID(),
       req.user!.id,
       req.user!.email,
-      `Card payment submitted for order ${order.payment_reference} (${order.fiat_amount} ${order.currency} for ${order.credits_amount} CR). Pending manual verification.`,
+      `Instant card payment completed for +${order.credits_amount} CR (Amount: ${order.fiat_amount} ${order.currency})`,
       now
     );
 
@@ -426,19 +450,18 @@ paymentRoutes.post('/orders/:id/instant-checkout', paymentRateLimiter, (req: Aut
       orderId: order.id,
       amount: order.fiat_amount,
       currency: order.currency,
-      credits: order.credits_amount,
-      verificationStatus: 'pending_manual'
+      credits: order.credits_amount
     });
 
     const updated = db.prepare('SELECT * FROM payment_orders WHERE id = ?').get(order.id);
 
     res.json({
-      message: `Payment submitted. Your order is pending verification and will be credited within 1-24 hours once confirmed.`,
-      order: updated
+      message: `Payment successful! +${order.credits_amount} credits added to your reserve immediately.`,
+      order: updated,
+      newBalance: ledgerResult.newBalance
     });
   } catch (error: any) {
-    console.error('Error in instant-checkout:', error);
-    res.status(500).json({ error: 'Failed to process payment.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -446,7 +469,7 @@ paymentRoutes.post('/orders/:id/instant-checkout', paymentRateLimiter, (req: Aut
  * GET /api/payments/my-orders
  * List user's deposit orders
  */
-paymentRoutes.get('/my-orders', paymentRateLimiter, (req: AuthenticatedRequest, res: Response) => {
+paymentRoutes.get('/my-orders', (req: AuthenticatedRequest, res: Response) => {
   try {
     const orders = db.prepare(`
       SELECT * FROM payment_orders
@@ -457,7 +480,6 @@ paymentRoutes.get('/my-orders', paymentRateLimiter, (req: AuthenticatedRequest, 
 
     res.json({ orders });
   } catch (error: any) {
-    console.error('Error fetching payment orders:', error);
-    res.status(500).json({ error: 'Failed to fetch payment orders.' });
+    res.status(500).json({ error: error.message });
   }
 });

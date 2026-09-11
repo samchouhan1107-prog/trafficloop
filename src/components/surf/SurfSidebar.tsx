@@ -7,7 +7,6 @@ interface SurfSidebarProps {
   session: SurfSessionPayload | null;
   timeLeft: number;
   totalDuration: number;
-  elapsedSeconds: number;
   isTimerFinished: boolean;
   selectedChallengeId: string | null;
   isClaiming: boolean;
@@ -23,7 +22,6 @@ export function SurfSidebar({
   session,
   timeLeft,
   totalDuration,
-  elapsedSeconds,
   isTimerFinished,
   selectedChallengeId,
   isClaiming,
@@ -37,17 +35,6 @@ export function SurfSidebar({
   if (!session) return null;
 
   const progressPercent = Math.min(100, Math.max(0, ((totalDuration - timeLeft) / totalDuration) * 100));
-
-  // Zone coloring: start cyan → mid amber → last 5s emerald pulse
-  const isNearComplete = !isTimerFinished && timeLeft <= 5;
-  const isMidway = !isTimerFinished && timeLeft > 5 && progressPercent >= 40;
-  const ringColor = isTimerFinished
-    ? 'stroke-emerald-400'
-    : isNearComplete
-    ? 'stroke-emerald-400 animate-[pulse_1s_ease-in-out_infinite]'
-    : isMidway
-    ? 'stroke-amber-400'
-    : 'stroke-cyan-400';
 
   const renderIcon = (iconName: string) => {
     switch (iconName) {
@@ -137,7 +124,7 @@ export function SurfSidebar({
               cx="50"
               cy="50"
               r="40"
-              className={`transition-all duration-300 ${ringColor}`}
+              className={`transition-all duration-300 ${isTimerFinished ? 'stroke-emerald-400' : 'stroke-cyan-400'}`}
               strokeWidth="7"
               strokeDasharray={251}
               strokeDashoffset={251 - (251 * progressPercent) / 100}
@@ -150,38 +137,18 @@ export function SurfSidebar({
             {isTimerFinished ? (
               <CheckCircle2 className="h-7 w-7 text-emerald-400 animate-bounce" />
             ) : (
-              <div className="flex flex-col items-center">
-                <span className={`text-2xl font-black tracking-tight tabular-nums ${isNearComplete ? 'text-emerald-400 animate-pulse' : 'text-white'}`}>
-                  {timeLeft}
-                </span>
+              <>
+                <span className="text-2xl font-black tracking-tight text-white">{timeLeft}</span>
                 <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">Sec</span>
-                <span className="mt-0.5 text-[9px] font-medium text-slate-500 tabular-nums">
-                  {elapsedSeconds}s elapsed
-                </span>
-              </div>
+              </>
             )}
           </div>
         </div>
 
         <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-slate-400">
-          <Clock className={`h-3 w-3 ${isNearComplete ? 'text-emerald-400 animate-pulse' : 'text-cyan-400'}`} />
-          <span>{isTimerFinished ? 'Dwell time fulfilled' : `Required: ${totalDuration}s · ${timeLeft}s left`}</span>
+          <Clock className="h-3 w-3 text-cyan-400" />
+          <span>{isTimerFinished ? 'Dwell time fulfilled' : `Required: ${totalDuration}s`}</span>
         </div>
-
-        {/* Next campaign unlock countdown */}
-        {isTimerFinished && typeof session.next_campaign_due_seconds === 'number' && session.next_campaign_due_seconds > 0 && (
-          <div className="mt-2.5 rounded-lg border border-slate-800 bg-slate-900/80 px-2.5 py-1.5 text-[11px] text-slate-300">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5">
-                <Globe className="h-3 w-3 text-cyan-400" />
-                Next site unlocks in
-              </span>
-              <span className="font-mono font-bold text-cyan-300 tabular-nums">
-                {session.next_campaign_due_seconds}s
-              </span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Human Verification Challenge Section */}
@@ -259,28 +226,14 @@ export function SurfSidebar({
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center text-center p-3 text-slate-400 space-y-2">
-            <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
               <div
-                className={`h-full transition-all duration-300 ${
-                  isNearComplete
-                    ? 'bg-gradient-to-r from-emerald-500 to-emerald-300 animate-pulse'
-                    : isMidway
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-300'
-                    : 'bg-gradient-to-r from-cyan-500 to-sky-400'
-                }`}
+                className="h-full bg-gradient-to-r from-cyan-500 to-sky-400 transition-all duration-300"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <div className="flex items-center justify-between w-full text-[10px] font-mono">
-              <span className={isNearComplete ? 'text-emerald-400 font-bold animate-pulse' : 'text-cyan-400'}>
-                {elapsedSeconds}s / {totalDuration}s
-              </span>
-              <span className="text-slate-500">live tick · 1s</span>
-            </div>
             <p className="text-[11px] text-slate-400">
-              {isNearComplete
-                ? 'Almost there — timer completes in a few seconds!'
-                : 'Surfing in progress... Select verification icon once timer completes.'}
+              Surfing in progress... Select verification icon once timer completes.
             </p>
           </div>
         )}

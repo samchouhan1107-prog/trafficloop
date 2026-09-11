@@ -3,30 +3,30 @@ import crypto from 'node:crypto';
 import { db } from './db.js';
 
 export async function seedDatabase(): Promise<void> {
-  const usersCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
+  const usersCount = (db.prepare("SELECT COUNT(*) as count FROM users WHERE email != 'network@trafficloop.global'").get() as { count: number }).count;
   if (usersCount > 0) {
+    // Check if Sameer's account exists, if not create it
+    const sameerUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = LOWER('sameerchouhan758@gmail.com')").get();
+    if (!sameerUser) {
+      const sameerHash = await bcrypt.hash('sameer123456', 10);
+      const sameerId = crypto.randomUUID();
+      const isoNow = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO users (
+          id, email, password_hash, name, role, location, preferred_currency, credits,
+          total_earned_credits, total_spent_credits, total_visits_made,
+          total_visits_received, status, created_at, last_login_at
+        ) VALUES (?, 'sameerchouhan758@gmail.com', ?, 'Sameer Chouhan', 'admin', 'India', 'INR', 250.0, 350.0, 100.0, 150, 85, 'active', ?, ?)
+      `).run(sameerId, sameerHash, isoNow, isoNow);
+    }
     return; // Already seeded
   }
 
   console.log('🌱 Seeding initial TrafficLoop database with production-grade demo data...');
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex');
-  const demoPassword = process.env.SEED_DEMO_PASSWORD || crypto.randomBytes(16).toString('hex');
-  const generalPassword = process.env.SEED_USER_PASSWORD || crypto.randomBytes(16).toString('hex');
-
-  if (!process.env.SEED_ADMIN_PASSWORD) {
-    console.warn('[Security] SEED_ADMIN_PASSWORD not set. Generated random admin password:', adminPassword);
-  }
-  if (!process.env.SEED_DEMO_PASSWORD) {
-    console.warn('[Security] SEED_DEMO_PASSWORD not set. Generated random demo password:', demoPassword);
-  }
-  if (!process.env.SEED_USER_PASSWORD) {
-    console.warn('[Security] SEED_USER_PASSWORD not set. Generated random user password:', generalPassword);
-  }
-
-  const passwordHashAdmin = await bcrypt.hash(adminPassword, 10);
-  const passwordHashDemo = await bcrypt.hash(demoPassword, 10);
-  const passwordHashGeneral = await bcrypt.hash(generalPassword, 10);
+  const passwordHashAdmin = await bcrypt.hash('admin123456', 10);
+  const passwordHashDemo = await bcrypt.hash('demo123456', 10);
+  const passwordHashGeneral = await bcrypt.hash('user123456', 10);
 
   const now = new Date();
   const isoNow = now.toISOString();

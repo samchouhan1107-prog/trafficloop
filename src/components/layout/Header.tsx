@@ -1,8 +1,9 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { useTheme } from '../../context/ThemeContext.js';
-import { Coins, Flame, Shield, LogOut, User as UserIcon, Play, LayoutDashboard, Layers, BarChart2, Sun, Moon, Monitor, Gift } from 'lucide-react';
+import { Coins, Flame, Shield, LogOut, User as UserIcon, Play, LayoutDashboard, Layers, BarChart2, Sun, Moon, Monitor, Gift, AlertTriangle } from 'lucide-react';
 import { formatCredits, formatInr } from '../../utils/formatters.js';
+import { NotificationCenter } from '../notifications/NotificationCenter.js';
 
 interface HeaderProps {
   currentPath: string;
@@ -174,6 +175,9 @@ export function Header({ currentPath, onNavigate }: HeaderProps) {
                 <span className="hidden sm:inline">Start Surfing</span>
                 <span className="sm:hidden">Surf</span>
               </button>
+
+              {/* Notification Center */}
+              <NotificationCenter onNavigate={onNavigate} />
 
               {/* Profile Link */}
               <button

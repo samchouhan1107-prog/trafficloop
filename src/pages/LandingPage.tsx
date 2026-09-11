@@ -108,25 +108,25 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
   return (
     <div className="space-y-24 pb-20">
       {/* 1. HERO SECTION */}
-      <section className="relative pt-6 sm:pt-14 text-center bg-glow-cyan">
+      <section className="relative pt-6 sm:pt-14 text-center">
         {/* Subtle background glow effect */}
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[340px] bg-cyan-500/10 blur-[130px] rounded-full pointer-events-none" />
 
         <div className="relative mx-auto max-w-4xl px-4 sm:px-6">
           {/* Trust badge */}
-          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/60 px-4 py-1.5 text-xs font-semibold text-cyan-300 backdrop-blur-md mb-6 shadow-sm animate-rise">
+          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/60 px-4 py-1.5 text-xs font-semibold text-cyan-300 backdrop-blur-md mb-6 shadow-sm">
             <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
             <span>Point-to-Point Visitor Exchange · WebZoneBW Ecosystem</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.15] animate-rise">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.15]">
             Verified Human Traffic <br className="hidden sm:inline" />
-            <span className="text-gradient-cyan">
+            <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-cyan-100 bg-clip-text text-transparent">
               Without Ad Intermediaries
             </span>
           </h1>
 
-          <p className="mt-5 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed animate-rise">
+          <p className="mt-5 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
             TrafficLoop is a reciprocal visitor exchange network where website owners explore participating platforms, earn verified traffic credits, and direct genuine human audiences to their own web tools and destinations.
           </p>
 
@@ -135,7 +135,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             <button
               id="hero-get-started-btn"
               onClick={() => onNavigate('/register')}
-              className="pressable w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 px-6 py-3.5 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/80 transition-all hover:scale-[1.02]"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 px-6 py-3.5 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-950/80 transition-all hover:scale-[1.02] active:scale-[0.98]"
             >
               <span>Join TrafficLoop (+15 Bonus Credits)</span>
               <ArrowRight className="h-4 w-4" />
@@ -144,7 +144,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
             <button
               id="hero-rewards-btn"
               onClick={() => onNavigate('/rewards')}
-              className="pressable w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl border border-emerald-600/70 bg-emerald-950/70 px-5 py-3.5 text-sm font-semibold text-emerald-300 hover:bg-emerald-900/80 hover:border-emerald-500 transition-all shadow-lg shadow-emerald-950/60"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl border border-emerald-600/70 bg-emerald-950/70 px-5 py-3.5 text-sm font-semibold text-emerald-300 hover:bg-emerald-900/80 hover:border-emerald-500 transition-all shadow-lg shadow-emerald-950/60"
             >
               <span className="text-base">🇮🇳</span>
               <span>Sign In & Rewards (450K Target)</span>
@@ -279,17 +279,9 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
                   </div>
                   <div className="h-2 w-full rounded-full bg-slate-950 overflow-hidden border border-slate-800">
                     <div
-                      className={`h-full transition-all duration-1000 ease-linear ${
-                        simSeconds <= 5 && simStep === 'browsing'
-                          ? 'bg-gradient-to-r from-emerald-500 to-emerald-300 animate-pulse'
-                          : 'bg-gradient-to-r from-cyan-500 to-sky-400'
-                      }`}
+                      className="h-full bg-gradient-to-r from-cyan-500 to-sky-400 transition-all duration-1000 ease-linear"
                       style={{ width: `${((15 - simSeconds) / 15) * 100}%` }}
                     />
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-slate-500">
-                    <span>{15 - simSeconds}s elapsed</span>
-                    <span className="text-slate-600">per-second tick</span>
                   </div>
                 </div>
 
@@ -559,12 +551,6 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               <p className="mt-2 text-xs text-slate-300 leading-relaxed">
                 Add your website URLs with custom dwell durations (15s to 60s), daily limits, and geographic targeting preferences.
               </p>
-              <div className="mt-3 rounded-lg border border-amber-700/40 bg-gradient-to-r from-amber-950/50 to-cyan-950/40 px-2.5 py-2">
-                <p className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                  +500,000 LIFETIME FREE VISITS per new URL
-                </p>
-              </div>
             </div>
             <div className="mt-4 pt-3 border-t border-slate-800/60 text-[11px] text-sky-400 font-semibold">
               Automated AI Scanner

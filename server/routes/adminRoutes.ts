@@ -29,7 +29,7 @@ adminRoutes.get('/overview', (req: AuthenticatedRequest, res: Response) => {
       recentAdminActions
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -108,7 +108,7 @@ adminRoutes.post('/users/:id/adjust-credits', (req: AuthenticatedRequest, res: R
       newBalance
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -172,7 +172,7 @@ adminRoutes.patch('/users/:id/status', (req: AuthenticatedRequest, res: Response
 
     res.json({ message: 'User updated successfully' });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -277,7 +277,7 @@ adminRoutes.post('/reviews/:id/decision', (req: AuthenticatedRequest, res: Respo
       status: newCampaignStatus
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -374,7 +374,7 @@ adminRoutes.put('/settings', (req: AuthenticatedRequest, res: Response) => {
     const updated = db.prepare("SELECT * FROM platform_settings WHERE id = 'default'").get();
     res.json({ message: 'Settings updated successfully', settings: updated });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -404,7 +404,7 @@ adminRoutes.get('/payments', (req: AuthenticatedRequest, res: Response) => {
 
     res.json({ orders, pendingCount });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -503,7 +503,7 @@ adminRoutes.post('/payments/:id/decision', (req: AuthenticatedRequest, res: Resp
       res.status(400).json({ error: 'Action must be "approve" or "reject".' });
     }
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -582,7 +582,7 @@ adminRoutes.patch('/bank-settings', (req: AuthenticatedRequest, res: Response) =
       settings: updated
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'An internal error occurred.' });
+    res.status(500).json({ error: error.message });
   }
 });
 

@@ -20,7 +20,7 @@ rewardRoutes.get('/summary', optionalAuthMiddleware, (req: AuthenticatedRequest,
     res.json(summary);
   } catch (error: any) {
     console.error('Error fetching rewards summary:', error);
-    res.status(500).json({ error: 'Failed to fetch rewards summary' });
+    res.status(500).json({ error: error.message || 'Failed to fetch rewards summary' });
   }
 });
 
@@ -36,7 +36,7 @@ rewardRoutes.get('/activity', authMiddleware, (req: AuthenticatedRequest, res: R
     res.json(activity);
   } catch (error: any) {
     console.error('Error fetching rewards activity:', error);
-    res.status(500).json({ error: 'Failed to fetch rewards activity' });
+    res.status(500).json({ error: error.message || 'Failed to fetch rewards activity' });
   }
 });
 
@@ -55,7 +55,7 @@ rewardRoutes.get('/eligibility', authMiddleware, (req: AuthenticatedRequest, res
     res.json(eligibility);
   } catch (error: any) {
     console.error('Error fetching rewards eligibility:', error);
-    res.status(500).json({ error: 'Failed to fetch rewards eligibility' });
+    res.status(500).json({ error: error.message || 'Failed to fetch rewards eligibility' });
   }
 });
 
@@ -79,6 +79,34 @@ rewardRoutes.post('/claim', authMiddleware, claimRateLimiter, (req: Authenticate
   } catch (error: any) {
     console.warn('[RewardClaim Rejected]:', error?.message || error);
     const statusCode = error.message?.includes('not found') || error.message?.includes('already been claimed') || error.message?.includes('not eligible') ? 400 : 500;
-    res.status(statusCode).json({ error: 'Failed to claim reward' });
+    res.status(statusCode).json({ error: error.message || 'Failed to claim reward' });
+  }
+});
+
+/**
+ * POST /api/rewards/activity-event
+ * Protected endpoint.
+ * Accepts authentic user activity events (e.g. feature exploration, user actions)
+ * and qualifies, calculates, and records points strictly server-side with structured logging.
+ */
+rewardRoutes.post('/activity-event', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const sessionId = req.sessionId || req.sessionToken || (req as any).session?.id;
+    const clientIp = req.ip || (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+    const userAgent = req.headers['user-agent'] as string;
+
+    const result = RewardService.processUserActivity(
+      userId,
+      sessionId,
+      req.body,
+      clientIp,
+      userAgent
+    );
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error processing user activity event:', error);
+    res.status(500).json({ error: error.message || 'Failed to process activity event' });
   }
 });

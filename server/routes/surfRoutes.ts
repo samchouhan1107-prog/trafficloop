@@ -3,6 +3,7 @@ import { db } from '../database/db.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { TrafficExchangeService } from '../services/trafficExchangeService.js';
 import { GA4Service } from '../services/ga4Service.js';
+import { RewardService } from '../services/rewardService.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 
 export const surfRoutes = Router();
@@ -64,7 +65,7 @@ surfRoutes.post('/start', surfStartLimiter, (req: AuthenticatedRequest, res: Res
       return;
     }
     console.error('Surf start error:', error);
-    res.status(500).json({ error: 'Failed to start surf session' });
+    res.status(500).json({ error: error.message || 'Failed to start surf session' });
   }
 });
 
@@ -93,20 +94,108 @@ surfRoutes.post('/complete', surfCompleteLimiter, (req: AuthenticatedRequest, re
       visitorId: req.user!.id
     });
 
+    try {
+      RewardService.processUserActivity(
+        req.user!.id,
+        (req as any).session?.id,
+        {
+          eventType: 'surf_dwell_verified',
+          feature: 'surf_arena',
+          path: '/surf',
+          metadata: {
+            visitId: result.visitId,
+            creditsEarned: result.creditsEarned,
+            dwellSeconds: result.dwellSeconds
+          },
+          eventId: `surf-visit-${result.visitId}`
+        },
+        req.ip,
+        req.headers['user-agent'] as string
+      );
+    } catch (rewardErr) {
+      console.warn('[surfRoutes] Error awarding reward points for visit:', rewardErr);
+    }
+
     res.json(result);
   } catch (error: any) {
-    if (error?.code === 'INSUFFICIENT_DWELL') {
-      res.status(400).json({
-        error: 'Insufficient viewing duration.',
-        code: 'INSUFFICIENT_DWELL',
-        message: error.message,
-        remainingSeconds: error.remainingSeconds || 1,
-        requiredDwellSeconds: error.requiredDwellSeconds
-      });
+    console.error('Surf complete error:', error);
+    res.status(400).json({ error: error.message || 'Failed to verify and complete visit' });
+  }
+});
+
+/**
+ * POST /api/surf/register-click
+ * Registers an authentic visitor click on the surfed webpage, awarding engagement credits and firing a GA4 'click' beacon
+ */
+surfRoutes.post('/register-click', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { sessionToken, clickType, linkUrl, linkText } = req.body;
+
+    if (!sessionToken) {
+      res.status(400).json({ error: 'Session token is required.' });
       return;
     }
-    console.error('Surf complete error:', error);
-    res.status(400).json({ error: 'Failed to verify and complete visit' });
+
+    const result = TrafficExchangeService.registerVisitorClick(
+      req.user!.id,
+      String(sessionToken),
+      clickType || 'in_frame',
+      linkUrl ? String(linkUrl) : undefined,
+      linkText ? String(linkText) : undefined
+    );
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('Register click error:', error);
+    res.status(400).json({ error: error.message || 'Failed to register click on webpage' });
+  }
+});
+
+/**
+ * POST /api/surf/heartbeat
+ * Records active vs background dwell time based on client tab visibility and window focus
+ */
+surfRoutes.post('/heartbeat', (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { sessionToken, isVisible, isFocused } = req.body;
+
+    if (!sessionToken) {
+      res.status(400).json({ error: 'Session token is required.' });
+      return;
+    }
+
+    const result = TrafficExchangeService.recordHeartbeat(
+      req.user!.id,
+      String(sessionToken),
+      Boolean(isVisible !== false),
+      Boolean(isFocused !== false)
+    );
+
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Heartbeat update failed' });
+  }
+});
+
+/**
+ * GET /api/surf/inspect-url
+ * Proactively verifies headers and iframe embeddability of a target URL
+ */
+surfRoutes.get('/inspect-url', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const url = req.query.url as string;
+    const campaignId = (req.query.campaignId as string) || 'inspect';
+
+    if (!url) {
+      res.status(400).json({ error: 'URL query parameter is required.' });
+      return;
+    }
+
+    const { CampaignAvailabilityService } = await import('../services/campaignAvailabilityService.js');
+    const result = await CampaignAvailabilityService.checkCampaignAvailability(campaignId, url);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Inspection failed' });
   }
 });
 
@@ -119,7 +208,7 @@ surfRoutes.get('/engine-diagnostics', (req: AuthenticatedRequest, res: Response)
     const diagnostics = TrafficExchangeService.getEngineDiagnostics();
     res.json(diagnostics);
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to retrieve engine diagnostics' });
+    res.status(500).json({ error: error.message || 'Failed to retrieve engine diagnostics' });
   }
 });
 

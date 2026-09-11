@@ -15,6 +15,12 @@ export function Badge({ status, variant, children, size = 'sm' }: BadgeProps) {
   if (status === 'active' || status === 'approved' || variant === 'green') {
     style = 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60';
     if (!children) label = 'Active';
+  } else if (status === 'test') {
+    style = 'bg-amber-950/80 text-amber-300 border-amber-600/70';
+    if (!children) label = 'Test Mode';
+  } else if (status === 'inactive') {
+    style = 'bg-amber-950/60 text-amber-200 border-amber-700/60';
+    if (!children) label = 'Inactive';
   } else if (status === 'pending_review' || status === 'pending' || variant === 'amber') {
     style = 'bg-amber-950/70 text-amber-300 border-amber-800/60';
     if (!children) label = 'Pending Review';

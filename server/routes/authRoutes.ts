@@ -8,6 +8,7 @@ import { GA4Service } from '../services/ga4Service.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { validateRealEmailDomain, generateSignupSecurityPin, verifySignupSecurityPin } from '../utils/spamDomainFilter.js';
+import { NotificationService } from '../services/notificationService.js';
 
 export const authRoutes = Router();
 
@@ -47,6 +48,8 @@ function formatUserResponse(userRow: any) {
     total_visits_made: Number(userRow.total_visits_made || 0),
     total_visits_received: Number(userRow.total_visits_received || 0),
     status: userRow.status,
+    last_active_at: userRow.last_active_at,
+    inactivity_reason: userRow.inactivity_reason,
     created_at: userRow.created_at,
     last_login_at: userRow.last_login_at
   };
@@ -145,7 +148,7 @@ authRoutes.post('/register', registerLimiter, async (req: AuthenticatedRequest, 
     // Set cookie
     res.cookie('trafficloop_token', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 30 * 86400000
     });
@@ -159,7 +162,7 @@ authRoutes.post('/register', registerLimiter, async (req: AuthenticatedRequest, 
     });
   } catch (error: any) {
     console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed. Please try again.' });
+    res.status(500).json({ error: error.message || 'Registration failed' });
   }
 });
 
@@ -207,7 +210,7 @@ authRoutes.post('/login', loginLimiter, async (req: AuthenticatedRequest, res: R
 
     res.cookie('trafficloop_token', sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV !== 'development',
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 30 * 86400000
     });
@@ -221,7 +224,7 @@ authRoutes.post('/login', loginLimiter, async (req: AuthenticatedRequest, res: R
     });
   } catch (error: any) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed. Please try again.' });
+    res.status(500).json({ error: error.message || 'Login failed' });
   }
 });
 
@@ -230,6 +233,43 @@ authRoutes.post('/login', loginLimiter, async (req: AuthenticatedRequest, res: R
  */
 authRoutes.get('/me', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
   res.json({ user: req.user });
+});
+
+/**
+ * POST /api/auth/refresh
+ * Secure session renewal endpoint.
+ * Extends the active session's expiration window by 30 days and re-issues cookie.
+ */
+authRoutes.post('/refresh', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sessionToken = req.sessionToken;
+    const now = new Date();
+    const newExpiresAt = new Date(now.getTime() + 30 * 86400000).toISOString();
+
+    if (sessionToken) {
+      db.prepare(`
+        UPDATE sessions
+        SET expires_at = ?, last_renewed_at = ?
+        WHERE token = ?
+      `).run(newExpiresAt, now.toISOString(), sessionToken);
+
+      res.cookie('trafficloop_token', sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 86400000
+      });
+    }
+
+    res.json({
+      success: true,
+      token: sessionToken,
+      expiresAt: newExpiresAt,
+      user: req.user
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Session renewal failed' });
+  }
 });
 
 /**
@@ -271,7 +311,7 @@ authRoutes.put('/profile', authMiddleware, async (req: AuthenticatedRequest, res
       user: formatUserResponse(updatedUserRow)
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to update profile. Please try again.' });
+    res.status(500).json({ error: error.message || 'Failed to update profile.' });
   }
 });
 
@@ -309,6 +349,69 @@ authRoutes.post('/change-password', authMiddleware, async (req: AuthenticatedReq
 
     res.json({ message: 'Password updated successfully.' });
   } catch (error: any) {
-    res.status(500).json({ error: 'Password update failed. Please try again.' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/auth/heartbeat
+ * Reports user activity ping, keeps session active
+ */
+authRoutes.post('/heartbeat', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const now = new Date().toISOString();
+
+    db.prepare('UPDATE users SET last_active_at = ? WHERE id = ?').run(now, userId);
+
+    res.json({
+      status: req.user!.status,
+      last_active_at: now
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/auth/reactivate
+ * Restores an inactive user to active status with notification
+ */
+authRoutes.post('/reactivate', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const notification = NotificationService.notifyUserReactivated(userId);
+
+    const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+
+    res.json({
+      message: 'Account reactivated successfully!',
+      user: formatUserResponse(refreshedUser),
+      notification
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to reactivate account' });
+  }
+});
+
+/**
+ * POST /api/auth/set-idle
+ * Marks user session inactive due to idle timeout / inactivity with notification
+ */
+authRoutes.post('/set-idle', authMiddleware, (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const reason = req.body.reason || 'Session idle timeout (5+ min inactivity detected)';
+
+    const notification = NotificationService.notifyUserInactivity(userId, reason);
+    const refreshedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+
+    res.json({
+      message: 'Account marked inactive due to inactivity.',
+      user: formatUserResponse(refreshedUser),
+      notification
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to mark inactive' });
   }
 });

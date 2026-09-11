@@ -26,7 +26,9 @@ import {
   Calendar,
   IndianRupee,
   CheckCheck,
-  UserCheck
+  UserCheck,
+  Target,
+  Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
@@ -101,6 +103,15 @@ export function RewardsPage({ onNavigate }: RewardsPageProps) {
 
   useEffect(() => {
     fetchData();
+
+    const handlePointsUpdated = () => {
+      fetchData();
+    };
+
+    window.addEventListener('rewards_points_updated', handlePointsUpdated);
+    return () => {
+      window.removeEventListener('rewards_points_updated', handlePointsUpdated);
+    };
   }, [fetchData]);
 
   // Claim Single or All Eligible Rewards
@@ -158,6 +169,7 @@ export function RewardsPage({ onNavigate }: RewardsPageProps) {
   const indiaCampaign = summary?.indiaCampaign;
   const userRewards = summary?.userRewards;
   const analytics = summary?.analytics;
+  const monthlyPoints = summary?.monthlyPoints;
 
   const filteredLedger = eligibility?.items.filter(item => {
     if (statusFilter === 'ALL') return true;
@@ -324,6 +336,238 @@ export function RewardsPage({ onNavigate }: RewardsPageProps) {
             </div>
           </div>
         )}
+      </div>
+
+      {/* SECTION: MONTHLY TARGET & POINTS PROJECTION ENGINE */}
+      <div 
+        id="section-monthly-points-engine"
+        className="rounded-xl border border-cyan-900/60 bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 p-5 sm:p-6 shadow-xl space-y-5 relative overflow-hidden"
+      >
+        <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
+
+        {/* Header with Title and Dynamic Month Badges */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-950 to-slate-900 border border-cyan-700/60 text-cyan-400 shadow-md">
+              <Target className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                  MONTHLY TARGET & POINTS PROJECTION
+                </h2>
+                <span className="rounded-full bg-cyan-950/80 border border-cyan-700/70 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">
+                  {(monthlyPoints?.monthlyTarget || 450000).toLocaleString()} PTS Target
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Dynamic daily pacing & verified qualifying activity extrapolation for {monthlyPoints?.monthLabel || 'Current Month'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-lg bg-slate-950 border border-slate-800 px-3 py-1.5 text-slate-300 flex items-center gap-1.5 font-medium">
+              <Calendar className="h-3.5 w-3.5 text-cyan-400" />
+              <span>{monthlyPoints?.daysInCurrentMonth || 30} Days in Month</span>
+            </span>
+            <span className="rounded-lg bg-slate-950 border border-slate-800 px-3 py-1.5 text-slate-300 font-medium">
+              Day <strong className="text-cyan-300">{monthlyPoints?.elapsedDays || 1}</strong> of {monthlyPoints?.daysInCurrentMonth || 30} ({monthlyPoints?.remainingDays || 0} remaining)
+            </span>
+          </div>
+        </div>
+
+        {/* Key Metrics Grid (All 9 Server-Derived Variables) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* 1. Monthly Target */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3.5 space-y-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+              Monthly Target
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-white block">
+              {(monthlyPoints?.monthlyTarget || 450000).toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-400 font-medium block">
+              Points goal
+            </span>
+          </div>
+
+          {/* 2. Daily Target (Dynamic: monthlyTarget / daysInCurrentMonth) */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3.5 space-y-1">
+            <span className="text-[10px] uppercase font-bold text-cyan-400 block tracking-wider">
+              Daily Target Pace
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-cyan-300 block">
+              {(monthlyPoints?.dailyTarget || 0).toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-400 font-medium block">
+              pts/day ({monthlyPoints?.monthlyTarget || 450000} ÷ {monthlyPoints?.daysInCurrentMonth || 30}d)
+            </span>
+          </div>
+
+          {/* 3. Current-Month Points */}
+          <div className="rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-3.5 space-y-1">
+            <span className="text-[10px] uppercase font-bold text-emerald-400 block tracking-wider">
+              Current-Month Points
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-emerald-300 block">
+              {(monthlyPoints?.currentMonthPoints || 0).toLocaleString()}
+            </span>
+            <span className="text-[11px] text-emerald-400/80 font-medium block">
+              {monthlyPoints?.qualifyingEventsCount || 0} qualifying events
+            </span>
+          </div>
+
+          {/* 4. Daily Average */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3.5 space-y-1">
+            <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">
+              Daily Average
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-amber-300 block">
+              {(monthlyPoints?.dailyAverage || 0).toLocaleString()}
+            </span>
+            <span className="text-[11px] text-slate-400 font-medium block">
+              pts/day earned so far
+            </span>
+          </div>
+
+          {/* 5. Projected Monthly Points */}
+          <div className="rounded-lg border border-indigo-900/60 bg-indigo-950/30 p-3.5 space-y-1 col-span-2 sm:col-span-1">
+            <span className="text-[10px] uppercase font-bold text-indigo-300 block tracking-wider flex items-center gap-1">
+              <TrendingUp className="h-3 w-3" />
+              Projected Monthly
+            </span>
+            <span className="text-xl sm:text-2xl font-black text-indigo-200 block">
+              {(monthlyPoints?.projectedMonthlyPoints || 0).toLocaleString()}
+            </span>
+            <span className="text-[11px] text-indigo-400 font-medium block">
+              Paced forecast (extrapolated)
+            </span>
+          </div>
+        </div>
+
+        {/* Secondary Row: Current Points, Today's Points, This Week's Points, Remaining Points, Target Progress % */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
+          {/* Current Points (Total Persisted Account Balance) */}
+          <div className="rounded-lg border border-slate-800/80 bg-slate-950/60 p-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Account Total Points</span>
+            <span className="text-lg font-bold text-white mt-0.5 block">
+              {(monthlyPoints?.currentPoints || 0).toLocaleString()} PTS
+            </span>
+            <span className="text-[10px] text-slate-400">Persisted balance</span>
+          </div>
+
+          {/* Today's Points */}
+          <div className="rounded-lg border border-slate-800/80 bg-slate-950/60 p-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Today's Points</span>
+            <span className="text-lg font-bold text-emerald-400 mt-0.5 block">
+              +{(monthlyPoints?.todayPoints || 0).toLocaleString()} PTS
+            </span>
+            <span className="text-[10px] text-slate-400">Earned today</span>
+          </div>
+
+          {/* This Week's Points */}
+          <div className="rounded-lg border border-slate-800/80 bg-slate-950/60 p-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">This Week's Points</span>
+            <span className="text-lg font-bold text-cyan-400 mt-0.5 block">
+              +{(monthlyPoints?.thisWeekPoints || 0).toLocaleString()} PTS
+            </span>
+            <span className="text-[10px] text-slate-400">Current calendar week</span>
+          </div>
+
+          {/* Remaining Points */}
+          <div className="rounded-lg border border-slate-800/80 bg-slate-950/60 p-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Remaining to Target</span>
+            <span className="text-lg font-bold text-slate-200 mt-0.5 block">
+              {(monthlyPoints?.remainingPoints || 0).toLocaleString()} PTS
+            </span>
+            <span className="text-[10px] text-slate-400">Points remaining</span>
+          </div>
+
+          {/* Target Progress Percentage */}
+          <div className="rounded-lg border border-slate-800/80 bg-slate-950/60 p-3 col-span-2 sm:col-span-1">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Target Progress</span>
+            <span className="text-lg font-bold text-cyan-300 mt-0.5 block">
+              {(monthlyPoints?.targetProgressPercentage || 0).toFixed(2)}%
+            </span>
+            <span className="text-[10px] text-slate-400">Of 450K goal reached</span>
+          </div>
+        </div>
+
+        {/* Progress Bar & Pace Comparison */}
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/90 p-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white">Monthly Points Progress</span>
+              <span className="text-slate-400">
+                ({(monthlyPoints?.currentMonthPoints || 0).toLocaleString()} / {(monthlyPoints?.monthlyTarget || 450000).toLocaleString()} PTS)
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-[11px]">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                Current Earned: {(monthlyPoints?.currentMonthPoints || 0).toLocaleString()} PTS
+              </span>
+              <span className="flex items-center gap-1.5 text-indigo-300 font-medium">
+                <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                Projected: {(monthlyPoints?.projectedMonthlyPoints || 0).toLocaleString()} PTS
+              </span>
+            </div>
+          </div>
+
+          <div className="w-full bg-slate-800 h-3.5 rounded-full overflow-hidden border border-slate-700/60 p-0.5 relative">
+            {/* Projected indicator */}
+            <div 
+              className="bg-indigo-500/40 h-full rounded-full absolute top-0.5 left-0.5 transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(0, ((monthlyPoints?.projectedMonthlyPoints || 0) / (monthlyPoints?.monthlyTarget || 450000)) * 100))}%` }}
+            />
+            {/* Actual earned points */}
+            <div 
+              className="bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 h-full rounded-full transition-all duration-500 relative z-10"
+              style={{ width: `${Math.min(100, Math.max(0.5, ((monthlyPoints?.currentMonthPoints || 0) / (monthlyPoints?.monthlyTarget || 450000)) * 100))}%` }}
+            />
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 text-[11px] text-slate-400">
+            <span>
+              Dynamic Daily Target: <strong className="text-slate-200">{(monthlyPoints?.dailyTarget || 0).toLocaleString()} PTS / day</strong> dynamically calculated for {monthlyPoints?.daysInCurrentMonth || 30} days in {monthlyPoints?.monthLabel || 'the month'}.
+            </span>
+            <span className="text-slate-400">
+              Extrapolation Formula: <code className="text-cyan-300 font-mono">(Current Qualifying Points ÷ Elapsed Days) × Total Month Days</code>
+            </span>
+          </div>
+        </div>
+
+        {/* Transparency Notice & Live Earning Callouts */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 rounded-lg border border-slate-800/80 bg-slate-900/40 p-3.5 text-xs text-slate-300">
+          <div className="flex items-start gap-2.5">
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <span className="font-semibold text-white">Authentic User Activity Rule</span>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Points originate solely from authentic, verifiable user actions (feature exploration, verified surf session dwells, tri-station rotation, campaign management). Projected monthly points is a statistical extrapolation based on elapsed days and does not count as earned points.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              id="monthly-points-explore-btn"
+              onClick={() => onNavigate('/dashboard')}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 hover:text-white transition-colors"
+            >
+              Explore Dashboard
+            </button>
+            <button
+              id="monthly-points-surf-btn"
+              onClick={() => onNavigate('/surf')}
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-sky-600 px-3 py-1.5 text-xs font-bold text-white hover:from-cyan-500 hover:to-sky-500 transition-all shadow-md shadow-cyan-950/50"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span>Surf & Earn Points</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* SECTION 2 & 3: GRID (INDIA CAMPAIGN 450K TARGET + YOUR REWARDS) */}

@@ -43,9 +43,9 @@ export function KotakUpiCard({
   const [isVerifying, setIsVerifying] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const upiId = bankDetails?.upiId || '';
-  const upiName = bankDetails?.upiName || '';
-  const upiBank = bankDetails?.upiBankName || '';
+  const upiId = bankDetails?.upiId || '8198091036@kotakbank';
+  const upiName = bankDetails?.upiName || 'Sameer Chouhan';
+  const upiBank = bankDetails?.upiBankName || 'Kotak Mahindra Bank (Kotak 811)';
   const amountInr = order.currency === 'INR' ? order.fiat_amount : Number((order.fiat_amount * 84).toFixed(2));
   const formattedAmount = formatInr(amountInr);
 

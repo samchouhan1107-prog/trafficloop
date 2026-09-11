@@ -34,7 +34,6 @@ systemRoutes.get('/public-stats', (req: Request, res: Response) => {
       ecosystem: 'WebZoneBW Traffic Network'
     });
   } catch (error: any) {
-    console.error('Error fetching public stats:', error);
-    res.status(500).json({ error: 'Failed to retrieve public stats.' });
+    res.status(500).json({ error: error.message });
   }
 });

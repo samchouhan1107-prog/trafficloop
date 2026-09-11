@@ -6,37 +6,18 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
   }
 
   body {
     background-color: #020617;
     color: #f8fafc;
     overflow-x: hidden;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  }
-
-  /* Respect users who prefer reduced motion */
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-    }
-  }
-
-  /* Visible, consistent focus states for keyboard users */
-  :focus-visible {
-    outline: 2px solid rgba(34, 211, 238, 0.7);
-    outline-offset: 2px;
-    border-radius: 4px;
   }
 
   /* Custom WebKit Scrollbars */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -46,99 +27,9 @@
   ::-webkit-scrollbar-thumb {
     background: #1e293b;
     border-radius: 9999px;
-    border: 2px solid #090d16;
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: #334155;
-  }
-
-  ::-webkit-scrollbar-corner { background: #090d16; }
-
-  /* Numeric alignment for timers, balances & counts */
-  .tabular-nums {
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-@layer utilities {
-  /* Ambient background glow used on hero / dashboard */
-  .bg-glow-cyan {
-    background:
-      radial-gradient(ellipse 60% 50% at 20% 0%, rgba(34, 211, 238, 0.09), transparent 60%),
-      radial-gradient(ellipse 50% 40% at 85% 10%, rgba(59, 130, 246, 0.08), transparent 60%);
-  }
-
-  /* Frosted glass panel */
-  .glass {
-    background: rgba(15, 23, 42, 0.72);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(148, 163, 184, 0.12);
-  }
-
-  /* Gradient text */
-  .text-gradient-cyan {
-    background: linear-gradient(100deg, #22d3ee 0%, #60a5fa 55%, #818cf8 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  /* Progress shimmer for loading bars */
-  .shimmer {
-    position: relative;
-    overflow: hidden;
-  }
-  .shimmer::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.12), transparent);
-    animation: shimmerMove 1.8s infinite;
-  }
-  @keyframes shimmerMove {
-    100% { transform: translateX(100%); }
-  }
-}
-
-@layer components {
-  /* Skeleton placeholder */
-  .skeleton {
-    background: linear-gradient(100deg, #0f172a 40%, #1e293b 50%, #0f172a 60%);
-    background-size: 200% 100%;
-    animation: skeletonShimmer 1.4s ease-in-out infinite;
-    border-radius: 0.5rem;
-  }
-  @keyframes skeletonShimmer {
-    0% { background-position: 120% 0; }
-    100% { background-position: -80% 0; }
-  }
-
-  /* Soft entrance for cards / modals */
-  .animate-rise {
-    animation: riseIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  @keyframes riseIn {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* Subtle scale for pressable elements */
-  .pressable {
-    transition: transform 0.15s ease, box-shadow 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
-  }
-  .pressable:active:not(:disabled) {
-    transform: scale(0.97);
-  }
-
-  /* Countdown urgency pulse (used by surf / tri-station timers) */
-  .animate-urgency {
-    animation: urgencyPulse 1s ease-in-out infinite;
-  }
-  @keyframes urgencyPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
   }
 }

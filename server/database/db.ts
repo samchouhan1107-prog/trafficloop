@@ -121,8 +121,6 @@ function setupSchemaAndTables(): void {
       today_visits_received INTEGER NOT NULL DEFAULT 0,
       last_visit_reset_date TEXT,
       rejection_reason TEXT,
-      bonus_visit_limit INTEGER NOT NULL DEFAULT 500000,
-      bonus_visits_delivered INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -228,21 +226,21 @@ function setupSchemaAndTables(): void {
       auto_approval_min_score INTEGER NOT NULL DEFAULT 85,
       max_visits_per_user_hourly INTEGER NOT NULL DEFAULT 120,
       maintenance_mode INTEGER NOT NULL DEFAULT 0,
-      bank_name TEXT NOT NULL DEFAULT '',
-      bank_account_name TEXT NOT NULL DEFAULT '',
-      bank_account_number TEXT NOT NULL DEFAULT '',
-      bank_branch_code TEXT NOT NULL DEFAULT '',
-      bank_swift_code TEXT NOT NULL DEFAULT '',
+      bank_name TEXT NOT NULL DEFAULT 'First National Bank Botswana (FNB)',
+      bank_account_name TEXT NOT NULL DEFAULT 'WebZoneBW TrafficLoop Ltd',
+      bank_account_number TEXT NOT NULL DEFAULT '62849201948',
+      bank_branch_code TEXT NOT NULL DEFAULT '281467 (Mall Branch)',
+      bank_swift_code TEXT NOT NULL DEFAULT 'FIRNBWGX',
       bank_currency TEXT NOT NULL DEFAULT 'BWP',
-      bank_payment_instructions TEXT NOT NULL DEFAULT '',
+      bank_payment_instructions TEXT NOT NULL DEFAULT 'Please include your unique Payment Reference Code in your bank transfer narrative. Credits are credited upon verification.',
       credit_price_per_unit REAL NOT NULL DEFAULT 0.02,
-      mobile_money_details TEXT NOT NULL DEFAULT '',
-      crypto_wallet_address TEXT NOT NULL DEFAULT '',
-      upi_id TEXT NOT NULL DEFAULT '',
-      upi_name TEXT NOT NULL DEFAULT '',
-      upi_bank_name TEXT NOT NULL DEFAULT '',
-      upi_instructions TEXT NOT NULL DEFAULT '',
-      upi_enabled INTEGER NOT NULL DEFAULT 0,
+      mobile_money_details TEXT NOT NULL DEFAULT 'Orange Money / Smega / FNB eWallet: +267 71 234 567',
+      crypto_wallet_address TEXT NOT NULL DEFAULT 'USDT (TRC-20): TTrafficLoopOfficialTreasury99X',
+      upi_id TEXT NOT NULL DEFAULT '8198091036@kotakbank',
+      upi_name TEXT NOT NULL DEFAULT 'Sameer Chouhan',
+      upi_bank_name TEXT NOT NULL DEFAULT 'Kotak Mahindra Bank (Kotak 811)',
+      upi_instructions TEXT NOT NULL DEFAULT 'Scan QR code with any UPI app (GPay, PhonePe, Paytm, BHIM, Kotak 811) or tap direct UPI intent link.',
+      upi_enabled INTEGER NOT NULL DEFAULT 1,
       updated_at TEXT NOT NULL
     );
   `);
@@ -280,6 +278,8 @@ function setupSchemaAndTables(): void {
       qualifying_event_id TEXT NOT NULL UNIQUE,
       amount_inr REAL NOT NULL,
       amount_credits REAL NOT NULL DEFAULT 0.0,
+      points REAL NOT NULL DEFAULT 0.0,
+      month TEXT,
       status TEXT NOT NULL DEFAULT 'ELIGIBLE',
       transaction_id TEXT,
       notes TEXT,
@@ -308,6 +308,59 @@ function setupSchemaAndTables(): void {
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      link TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS seo_records (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT UNIQUE NOT NULL,
+      url TEXT NOT NULL,
+      canonical_url TEXT NOT NULL,
+      slug TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      meta_description TEXT NOT NULL,
+      category TEXT NOT NULL,
+      is_indexable INTEGER NOT NULL DEFAULT 1,
+      in_sitemap INTEGER NOT NULL DEFAULT 1,
+      http_status INTEGER NOT NULL DEFAULT 200,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_activity_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT,
+      event_type TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      path TEXT,
+      metadata_json TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      qualified INTEGER NOT NULL DEFAULT 0,
+      qualification_status TEXT NOT NULL DEFAULT 'PENDING',
+      qualification_reason TEXT,
+      points_calculated REAL NOT NULL DEFAULT 0.0,
+      points_awarded REAL NOT NULL DEFAULT 0.0,
+      processed_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_activity_events_user_created ON user_activity_events(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_activity_events_type_created ON user_activity_events(event_type, created_at);
   `);
 
   // Safe schema migrations for existing databases
@@ -319,16 +372,28 @@ function setupSchemaAndTables(): void {
     }
   };
 
+  runMigration("ALTER TABLE users ADD COLUMN points REAL NOT NULL DEFAULT 0.0;");
+  runMigration("ALTER TABLE users ADD COLUMN total_earned_points REAL NOT NULL DEFAULT 0.0;");
+  runMigration("ALTER TABLE reward_ledger ADD COLUMN points REAL NOT NULL DEFAULT 0.0;");
+  runMigration("ALTER TABLE reward_ledger ADD COLUMN month TEXT;");
+  runMigration("ALTER TABLE user_activity_events ADD COLUMN qualification_status TEXT NOT NULL DEFAULT 'PENDING';");
+  runMigration("ALTER TABLE user_activity_events ADD COLUMN points_calculated REAL NOT NULL DEFAULT 0.0;");
+  runMigration("ALTER TABLE user_activity_events ADD COLUMN processed_at TEXT;");
+
   runMigration("ALTER TABLE users ADD COLUMN location TEXT NOT NULL DEFAULT 'Botswana';");
   runMigration("ALTER TABLE users ADD COLUMN preferred_currency TEXT NOT NULL DEFAULT 'INR';");
+  runMigration("ALTER TABLE users ADD COLUMN login_streak INTEGER NOT NULL DEFAULT 1;");
+  runMigration("ALTER TABLE users ADD COLUMN last_active_at TEXT;");
+  runMigration("ALTER TABLE users ADD COLUMN inactivity_reason TEXT;");
   runMigration("ALTER TABLE credit_transactions ADD COLUMN inr_value REAL;");
   runMigration("ALTER TABLE credit_transactions ADD COLUMN currency TEXT DEFAULT 'INR';");
   runMigration("ALTER TABLE campaigns ADD COLUMN target_locations TEXT NOT NULL DEFAULT 'Worldwide';");
   runMigration("ALTER TABLE campaigns ADD COLUMN device_targeting TEXT NOT NULL DEFAULT 'all';");
   runMigration("ALTER TABLE campaigns ADD COLUMN ga4_measurement_id TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE campaigns ADD COLUMN ga4_api_secret TEXT DEFAULT NULL;");
-  runMigration("ALTER TABLE campaigns ADD COLUMN bonus_visit_limit INTEGER NOT NULL DEFAULT 500000;");
-  runMigration("ALTER TABLE campaigns ADD COLUMN bonus_visits_delivered INTEGER NOT NULL DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN total_clicks_received INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN interactive_clicks_enabled INTEGER DEFAULT 1;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN tier TEXT DEFAULT 'standard';");
   runMigration("ALTER TABLE visits ADD COLUMN visitor_country TEXT DEFAULT 'Botswana';");
   runMigration("ALTER TABLE visits ADD COLUMN visitor_country_code TEXT DEFAULT 'BW';");
   runMigration("ALTER TABLE visits ADD COLUMN visitor_device TEXT DEFAULT 'desktop';");
@@ -337,24 +402,78 @@ function setupSchemaAndTables(): void {
   runMigration("ALTER TABLE visits ADD COLUMN station_id TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN ga4_measurement_id TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN ga4_client_id TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE visits ADD COLUMN ga4_session_id TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN traffic_source TEXT DEFAULT 'direct';");
+  runMigration("ALTER TABLE visits ADD COLUMN clicks_count INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE visits ADD COLUMN last_click_at TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN egress_ip TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN egress_country TEXT DEFAULT NULL;");
   runMigration("ALTER TABLE visits ADD COLUMN egress_country_code TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_name TEXT NOT NULL DEFAULT 'First National Bank Botswana (FNB)';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_account_name TEXT NOT NULL DEFAULT 'WebZoneBW TrafficLoop Ltd';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_account_number TEXT NOT NULL DEFAULT '62849201948';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_branch_code TEXT NOT NULL DEFAULT '281467 (Mall Branch)';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_swift_code TEXT NOT NULL DEFAULT 'FIRNBWGX';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_currency TEXT NOT NULL DEFAULT 'BWP';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN bank_payment_instructions TEXT NOT NULL DEFAULT 'Please include your unique Payment Reference Code in your bank transfer narrative. Credits are credited upon verification.';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN credit_price_per_unit REAL NOT NULL DEFAULT 0.02;");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN mobile_money_details TEXT NOT NULL DEFAULT 'Orange Money / Smega / FNB eWallet: +267 71 234 567';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN crypto_wallet_address TEXT NOT NULL DEFAULT 'USDT (TRC-20): TTrafficLoopOfficialTreasury99X';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN upi_id TEXT NOT NULL DEFAULT '8198091036@kotakbank';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN upi_name TEXT NOT NULL DEFAULT 'Sameer Chouhan';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN upi_bank_name TEXT NOT NULL DEFAULT 'Kotak Mahindra Bank (Kotak 811)';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN upi_instructions TEXT NOT NULL DEFAULT 'Scan QR code with any UPI app (GPay, PhonePe, Paytm, BHIM, Kotak 811) or tap direct UPI intent link.';");
+  runMigration("ALTER TABLE platform_settings ADD COLUMN upi_enabled INTEGER NOT NULL DEFAULT 1;");
 
-  // Ensure default platform settings exists (no hardcoded credentials)
+  // Spend-time tracking & Heartbeat verification migrations
+  runMigration("ALTER TABLE visits ADD COLUMN active_dwell_seconds REAL DEFAULT 0.0;");
+  runMigration("ALTER TABLE visits ADD COLUMN background_dwell_seconds REAL DEFAULT 0.0;");
+  runMigration("ALTER TABLE visits ADD COLUMN last_heartbeat_at TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE visits ADD COLUMN heartbeat_count INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE visits ADD COLUMN verification_notes TEXT DEFAULT NULL;");
+
+  // Campaign Availability & Failover Routing migrations
+  runMigration("ALTER TABLE campaigns ADD COLUMN health_status TEXT DEFAULT 'healthy';");
+  runMigration("ALTER TABLE campaigns ADD COLUMN last_availability_check TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN consecutive_failures INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN fallback_url TEXT DEFAULT NULL;");
+
+  // Multi-URL rotation, execution cursor & scheduler progression migrations
+  runMigration("ALTER TABLE campaigns ADD COLUMN urls_json TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN url_cursor INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN country_cursor INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN failed_visits_count INTEGER DEFAULT 0;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN last_dispatched_at TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN next_dispatch_at TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE campaigns ADD COLUMN auto_progress INTEGER DEFAULT 1;");
+  runMigration("ALTER TABLE visits ADD COLUMN target_url TEXT DEFAULT NULL;");
+  runMigration("ALTER TABLE visits ADD COLUMN error_message TEXT DEFAULT NULL;");
+
+  // Backfill urls_json for existing campaigns if missing
+  try {
+    db.exec(`UPDATE campaigns SET urls_json = json_array(url) WHERE urls_json IS NULL OR urls_json = '';`);
+  } catch {}
+
+  // Session renewal tracking
+  runMigration("ALTER TABLE sessions ADD COLUMN last_renewed_at TEXT DEFAULT NULL;");
+
+  // Backfill points from historical rewards if needed
+  try {
+    db.exec(`
+      UPDATE reward_ledger SET points = (amount_credits * 100) WHERE (points IS NULL OR points = 0.0) AND amount_credits > 0;
+      UPDATE users SET points = COALESCE((SELECT SUM(points) FROM reward_ledger WHERE reward_ledger.user_id = users.id), 0.0) WHERE points IS NULL OR points = 0.0;
+    `);
+  } catch {
+    // Ignore
+  }
+
+  // Ensure default platform settings has upi details populated
   try {
     db.prepare(`
       UPDATE platform_settings
-      SET bank_name = COALESCE(NULLIF(bank_name, ''), ''),
-          bank_account_name = COALESCE(NULLIF(bank_account_name, ''), ''),
-          bank_account_number = COALESCE(NULLIF(bank_account_number, ''), ''),
-          bank_swift_code = COALESCE(NULLIF(bank_swift_code, ''), ''),
-          mobile_money_details = COALESCE(NULLIF(mobile_money_details, ''), ''),
-          crypto_wallet_address = COALESCE(NULLIF(crypto_wallet_address, ''), ''),
-          upi_id = COALESCE(NULLIF(upi_id, ''), ''),
-          upi_name = COALESCE(NULLIF(upi_name, ''), ''),
-          upi_bank_name = COALESCE(NULLIF(upi_bank_name, ''), '')
+      SET upi_id = COALESCE(NULLIF(upi_id, ''), '8198091036@kotakbank'),
+          upi_name = COALESCE(NULLIF(upi_name, ''), 'Sameer Chouhan'),
+          upi_bank_name = COALESCE(NULLIF(upi_bank_name, ''), 'Kotak Mahindra Bank (Kotak 811)')
       WHERE id = 'default'
     `).run();
   } catch {
@@ -369,10 +488,7 @@ function setupSchemaAndTables(): void {
     CREATE INDEX IF NOT EXISTS idx_visits_visitor ON visits(visitor_user_id);
     CREATE INDEX IF NOT EXISTS idx_visits_campaign ON visits(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_visits_created ON visits(created_at);
-    CREATE INDEX IF NOT EXISTS idx_visits_completed ON visits(completed_at);
-    CREATE INDEX IF NOT EXISTS idx_visits_status ON visits(status);
     CREATE INDEX IF NOT EXISTS idx_credit_tx_user ON credit_transactions(user_id);
-    CREATE INDEX IF NOT EXISTS idx_credit_tx_created ON credit_transactions(created_at);
     CREATE INDEX IF NOT EXISTS idx_reviews_campaign ON campaign_reviews(campaign_id);
     CREATE INDEX IF NOT EXISTS idx_payments_user ON payment_orders(user_id);
     CREATE INDEX IF NOT EXISTS idx_payments_status ON payment_orders(status);
@@ -380,9 +496,10 @@ function setupSchemaAndTables(): void {
     CREATE INDEX IF NOT EXISTS idx_rewards_status ON reward_ledger(status);
     CREATE INDEX IF NOT EXISTS idx_rewards_event ON reward_ledger(qualifying_event_id);
     CREATE INDEX IF NOT EXISTS idx_rewards_created ON reward_ledger(created_at);
-    CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at);
-    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read, created_at);
+    CREATE INDEX IF NOT EXISTS idx_seo_records_slug ON seo_records(slug);
+    CREATE INDEX IF NOT EXISTS idx_seo_records_campaign ON seo_records(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_seo_records_indexable ON seo_records(is_indexable, in_sitemap);
   `);
 
   // Insert default settings if not exists
@@ -399,8 +516,9 @@ function setupSchemaAndTables(): void {
         credit_price_per_unit, mobile_money_details, crypto_wallet_address, updated_at
       ) VALUES (
         'default', 1.0, 0.05, 10, 60, 15.0, 5.0, 30, 1, 85, 120, 0,
-        '', '', '', '', '', 'BWP', '',
-        0.02, '', '', ?
+        'First National Bank Botswana (FNB)', 'WebZoneBW TrafficLoop Ltd', '62849201948', '281467 (Mall Branch)',
+        'FIRNBWGX', 'BWP', 'Please include your unique Payment Reference Code in your bank transfer narrative. Credits are credited upon verification.',
+        0.02, 'Orange Money / Smega / FNB eWallet: +267 71 234 567', 'USDT (TRC-20): TTrafficLoopOfficialTreasury99X', ?
       )
     `).run(new Date().toISOString());
   }

@@ -30,9 +30,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const res = await api.getMe();
       setUser(res.user);
-    } catch {
-      api.setToken(null);
-      setUser(null);
+    } catch (err: any) {
+      // Only clear credentials if the server explicitly confirmed invalid/expired session (HTTP 401)
+      // Never sign out on transient network errors, timeouts, or temporary connectivity drops
+      if (
+        err?.status === 401 || 
+        err?.message?.toLowerCase().includes('session expired') || 
+        err?.message?.toLowerCase().includes('please log in')
+      ) {
+        api.setToken(null);
+        setUser(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -40,6 +48,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refreshUser();
+
+    // Rolling session renewal: proactively renew token every 6 hours while user is active
+    const renewalInterval = setInterval(() => {
+      if (api.getToken()) {
+        api.refreshToken().catch(() => {});
+      }
+    }, 6 * 60 * 60 * 1000);
+
+    // Re-verify user state upon network reconnection
+    const handleOnline = () => {
+      if (api.getToken()) {
+        refreshUser();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearInterval(renewalInterval);
+      window.removeEventListener('online', handleOnline);
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

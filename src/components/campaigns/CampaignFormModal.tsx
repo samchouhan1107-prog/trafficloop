@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal.js';
 import { api } from '../../services/api.js';
-import { ShieldCheck, AlertCircle, Sparkles, Globe, Monitor } from 'lucide-react';
+import { ShieldCheck, AlertCircle, Sparkles, Globe, Monitor, BarChart3, Search, CheckCircle2, HelpCircle } from 'lucide-react';
 import { formatCredits } from '../../utils/formatters.js';
 import { CustomCountryPicker } from '../common/CustomCountryPicker.js';
+import { GA4TagScanResult } from '../../types.js';
 
 interface CampaignFormModalProps {
   isOpen: boolean;
@@ -13,14 +14,14 @@ interface CampaignFormModalProps {
 }
 
 const CATEGORIES = [
-  'Tech & Software',
-  'Web Development',
-  'Developer Tools',
-  'Education & Tech',
-  'Design & UI',
-  'News & Blogs',
-  'Crypto & Web3',
-  'Business & Startups'
+  'Tech & Software (Active)',
+  'E-Commerce & Retail (Active)',
+  'SaaS & B2B (Active)',
+  'Finance & Crypto (Active)',
+  'News, Media & Blogs (Active)',
+  'Local Services (Active)',
+  'Education & Learning (Active)',
+  'Health & Wellness (Active)'
 ];
 
 export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCredits }: CampaignFormModalProps) {
@@ -28,10 +29,14 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
   const [url, setUrl] = useState('');
   const [duration, setDuration] = useState(15);
   const [budget, setBudget] = useState(20);
-  const [category, setCategory] = useState('Tech & Software');
+  const [category, setCategory] = useState(CATEGORIES[0]);
   const [dailyLimit, setDailyLimit] = useState(100);
   const [targetLocation, setTargetLocation] = useState('Worldwide');
   const [deviceTargeting, setDeviceTargeting] = useState('all');
+  const [operationalMode, setOperationalMode] = useState<'active' | 'test'>('active');
+  const [ga4MeasurementId, setGa4MeasurementId] = useState('');
+  const [isScanningGA4, setIsScanningGA4] = useState(false);
+  const [ga4ScanResult, setGa4ScanResult] = useState<GA4TagScanResult | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +73,27 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
     return () => clearTimeout(timer);
   }, [url, title]);
 
+  // Scan destination URL for GA4 tags
+  const handleScanGA4 = async () => {
+    if (!url || !url.startsWith('http')) {
+      setError('Please enter a valid destination URL starting with https:// first.');
+      return;
+    }
+    try {
+      setIsScanningGA4(true);
+      setError(null);
+      const scan = await api.scanWebsiteForGA4Tags(url);
+      setGa4ScanResult(scan);
+      if (scan.detectedMeasurementId) {
+        setGa4MeasurementId(scan.detectedMeasurementId);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to scan website for Google Analytics tags.');
+    } finally {
+      setIsScanningGA4(false);
+    }
+  };
+
   const costPerVisit = Number((1.0 + Math.max(0, duration - 15) * 0.05).toFixed(2));
   const estimatedVisits = costPerVisit > 0 ? Math.floor(budget / costPerVisit) : 0;
 
@@ -90,26 +116,42 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
       return;
     }
 
+    const parsedUrls = url
+      .split(/[\n,]+/)
+      .map((u) => u.trim())
+      .filter((u) => /^https?:\/\//i.test(u));
+
+    if (parsedUrls.length === 0) {
+      setError('Please provide at least one valid destination URL starting with http:// or https://');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await api.createCampaign({
         title: title.trim(),
-        url: url.trim(),
+        url: parsedUrls[0],
+        urls: parsedUrls,
         durationSeconds: duration,
         budget: Number(budget),
         category,
         dailyVisitLimit: Number(dailyLimit),
         targetLocations: targetLocation,
-        deviceTargeting
-      });
+        deviceTargeting,
+        ga4MeasurementId: ga4MeasurementId.trim() || undefined,
+        initialStatus: operationalMode
+      } as any);
 
       // Reset form
       setTitle('');
       setUrl('');
+      setGa4MeasurementId('');
+      setGa4ScanResult(null);
       setBudget(20);
       setDuration(15);
       setTargetLocation('Worldwide');
       setDeviceTargeting('all');
+      setOperationalMode('active');
       setPreValidation(null);
       onCampaignCreated();
       onClose();
@@ -152,16 +194,16 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
         {/* Destination URL */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="block text-xs font-semibold text-slate-300">Destination Website URL</label>
-            {isValidating && <span className="text-[11px] text-cyan-400">Scanning URL safety...</span>}
+            <label className="block text-xs font-semibold text-slate-300">Destination Website URL(s)</label>
+            <span className="text-[11px] text-slate-400">One URL or multiple URLs (one per line) for sequential rotation</span>
           </div>
-          <input
-            type="url"
+          <textarea
             required
-            placeholder="https://example.com"
+            rows={2}
+            placeholder="https://example.com/landing&#10;https://example.com/blog"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2 text-sm text-white placeholder:text-slate-600 font-mono focus:border-cyan-500 focus:outline-none"
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2 text-xs text-white placeholder:text-slate-600 font-mono focus:border-cyan-500 focus:outline-none resize-y"
           />
 
           {/* Live Pre-Validation Security Box */}
@@ -220,6 +262,54 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
           helperText="Select preset regions, recall countries by initial letter (A-Z), or enter custom ISO country codes."
         />
 
+        {/* Operational Mode Selection: Active Commercial vs Test Mode */}
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+            Initial Operational Mode
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setOperationalMode('active')}
+              className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition ${
+                operationalMode === 'active'
+                  ? 'border-emerald-500 bg-emerald-950/40 text-emerald-200 ring-1 ring-emerald-500/50'
+                  : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="mt-0.5 rounded-full p-1 bg-emerald-500/20 text-emerald-400">
+                <Sparkles className="h-3.5 w-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-bold text-white block">Active Commercial Mode</span>
+                <span className="text-[11px] text-emerald-300/80 leading-snug block mt-0.5">
+                  Immediate dispatch to real active surfers with verified dwell time.
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setOperationalMode('test')}
+              className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition ${
+                operationalMode === 'test'
+                  ? 'border-amber-500 bg-amber-950/40 text-amber-200 ring-1 ring-amber-500/50'
+                  : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div className="mt-0.5 rounded-full p-1 bg-amber-500/20 text-amber-400">
+                <Globe className="h-3.5 w-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-bold text-white block">Test Mode (Pre-Flight)</span>
+                <span className="text-[11px] text-amber-300/80 leading-snug block mt-0.5">
+                  Dry-run test mode to verify beacons & GA4 before promoting to active.
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
+
         {/* Device Targeting */}
         <div>
           <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 mb-1">
@@ -235,6 +325,71 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
             <option value="desktop">💻 Desktop & Laptops Only</option>
             <option value="mobile">📱 Mobile & Tablets Only</option>
           </select>
+        </div>
+
+        {/* Google Analytics 4 (GA4) Realtime Tracking Configuration */}
+        <div className="rounded-xl border border-cyan-800/40 bg-slate-900/60 p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-cyan-400" />
+              <label htmlFor="ga4-measurement-id-input" className="text-xs font-bold text-slate-200">
+                Google Analytics 4 Tracking (Optional)
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={handleScanGA4}
+              disabled={isScanningGA4 || !url}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md bg-cyan-950/80 border border-cyan-800/60 text-cyan-300 hover:bg-cyan-900/60 disabled:opacity-50 transition-colors"
+            >
+              {isScanningGA4 ? (
+                <>
+                  <div className="h-3 w-3 rounded-full border border-cyan-300 border-t-transparent animate-spin" />
+                  <span>Scanning...</span>
+                </>
+              ) : (
+                <>
+                  <Search className="w-3 h-3" />
+                  <span>Auto-Detect Tag</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div>
+            <input
+              id="ga4-measurement-id-input"
+              type="text"
+              placeholder="G-XXXXXXXXXX (e.g., G-D74J4R43K3)"
+              value={ga4MeasurementId}
+              onChange={(e) => setGa4MeasurementId(e.target.value.toUpperCase())}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-cyan-200 font-mono focus:border-cyan-500 focus:outline-none"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Provide your GA4 Measurement ID so visits dispatched to this campaign reflect in your <strong>analytics.google.com &gt; Realtime &gt; Users in last 30 minutes</strong> report with targeted geolocation!
+            </p>
+          </div>
+
+          {ga4ScanResult && (
+            <div className="rounded-lg bg-slate-950/90 border border-slate-800 p-2.5 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-300">Scan Status:</span>
+                <span className={ga4ScanResult.detectedMeasurementId ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                  {ga4ScanResult.detectedMeasurementId ? `Found ${ga4ScanResult.detectedMeasurementId}` : 'No tag in raw HTML (enter manually)'}
+                </span>
+              </div>
+              {ga4ScanResult.isSpaOrClientSide && (
+                <p className="text-[11px] text-amber-300/90">
+                  ⚡ Client-side SPA / dynamic script detected. Entering your Measurement ID above ensures 100% beacon reception.
+                </p>
+              )}
+              {ga4ScanResult.recommendations.length > 0 && (
+                <p className="text-[11px] text-slate-400">
+                  Tip: {ga4ScanResult.recommendations[0]}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Daily Visit Limit & 24h Rotational Slots */}
@@ -308,17 +463,10 @@ export function CampaignFormModal({ isOpen, onClose, onCampaignCreated, userCred
         <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3.5 text-xs">
           <div className="flex items-center justify-between text-slate-400">
             <span>Estimated Guaranteed Human Visits:</span>
-            <span className="text-sm font-bold text-cyan-400">~{estimatedVisits.toLocaleString()} visits</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between rounded-lg border border-amber-700/40 bg-gradient-to-r from-amber-950/40 to-cyan-950/30 px-2.5 py-2">
-            <div className="flex items-center gap-1.5 text-amber-300 font-semibold">
-              <Sparkles className="h-4 w-4 text-amber-400" />
-              <span>🎁 New URL Lifetime Bonus:</span>
-            </div>
-            <span className="font-mono font-bold text-amber-300">+500,000 FREE visits</span>
+            <span className="text-sm font-bold text-cyan-400">~{estimatedVisits} visits</span>
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
-            Every new URL instantly receives <span className="text-amber-300 font-semibold">500,000 lifetime free visits</span> via the autonomous delivery engine — no credits consumed. Paid credits extend beyond the bonus. Targeting: <span className="text-slate-300 font-medium">{targetLocation}</span> | <span className="text-slate-300 font-medium">{deviceTargeting === 'all' ? 'All Devices' : deviceTargeting}</span>. Unused credits are automatically refunded if paused or deleted.
+            Targeting: <span className="text-slate-300 font-medium">{targetLocation}</span> | <span className="text-slate-300 font-medium">{deviceTargeting === 'all' ? 'All Devices' : deviceTargeting}</span>. Unused credits are automatically refunded if paused or deleted.
           </p>
         </div>
 

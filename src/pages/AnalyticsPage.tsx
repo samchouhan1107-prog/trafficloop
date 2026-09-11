@@ -8,18 +8,19 @@ import { TrafficDebuggerUtility } from '../components/analytics/TrafficDebuggerU
 import { GlobalTrafficLogViewer } from '../components/analytics/GlobalTrafficLogViewer.js';
 import { UrlBrowseReportViewer } from '../components/analytics/UrlBrowseReportViewer.js';
 import { PageTimeLapViewer } from '../components/analytics/PageTimeLapViewer.js';
+import { GA4DeliveryLogViewer } from '../components/analytics/GA4DeliveryLogViewer.js';
 import { StatCard } from '../components/common/StatCard.js';
 import { CurrencyValuationCard } from '../components/common/CurrencyValuationCard.js';
 import { TrafficMetricsBreakdown } from '../components/analytics/TrafficMetricsBreakdown.js';
-import { Coins, ArrowDownLeft, ArrowUpRight, TrendingUp, ShieldCheck, RefreshCw, Globe, Radio, BarChart3, Flame, Terminal, FileText, Layers, Compass, Timer } from 'lucide-react';
+import { Coins, ArrowDownLeft, ArrowUpRight, TrendingUp, ShieldCheck, RefreshCw, Globe, Radio, BarChart3, Flame, Terminal, FileText, Layers, Compass, Timer, Zap } from 'lucide-react';
 import { CreditTransaction, WeeklyAnalyticsData, GeoTrafficDistributionData, Campaign } from '../types.js';
 import { formatCredits, formatInr } from '../utils/formatters.js';
 
-type AnalyticsTab = 'time_laps' | 'url_browse_report' | 'global_traffic_log' | 'overview_weekly' | 'geo_heatmap' | 'redirection_debugger' | 'credit_ledger' | 'all_views';
+type AnalyticsTab = 'ga4_realtime' | 'time_laps' | 'url_browse_report' | 'global_traffic_log' | 'overview_weekly' | 'geo_heatmap' | 'redirection_debugger' | 'credit_ledger' | 'all_views';
 
 export function AnalyticsPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<AnalyticsTab>('time_laps');
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>('ga4_realtime');
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [stats, setStats] = useState<any | null>(null);
   const [weeklyData, setWeeklyData] = useState<WeeklyAnalyticsData | null>(null);
@@ -131,6 +132,27 @@ export function AnalyticsPage() {
       {/* Navigation Tabs */}
       <div className="border-b border-slate-800">
         <nav className="flex items-center gap-2 overflow-x-auto pb-px scrollbar-none" aria-label="Analytics Tabs">
+          <button
+            type="button"
+            id="tab-ga4-realtime-btn"
+            onClick={() => setActiveTab('ga4_realtime')}
+            className={`flex items-center gap-2 px-4 py-3 text-xs font-bold whitespace-nowrap border-b-2 transition-all ${
+              activeTab === 'ga4_realtime'
+                ? 'border-emerald-500 text-emerald-300 bg-emerald-500/5'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
+            }`}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <BarChart3 className="h-4 w-4 text-emerald-400" />
+            <span>Google Analytics (GA4)</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+              Live Realtime
+            </span>
+          </button>
+
           <button
             type="button"
             id="tab-time-laps-btn"
@@ -251,6 +273,13 @@ export function AnalyticsPage() {
           </button>
         </nav>
       </div>
+
+      {/* Tab Content GA4: Google Analytics 4 Realtime & Tag Verification */}
+      {(activeTab === 'ga4_realtime' || activeTab === 'all_views') && (
+        <section id="section-ga4-realtime" className="space-y-6">
+          <GA4DeliveryLogViewer campaigns={campaigns} />
+        </section>
+      )}
 
       {/* Tab Content 0: Page Time Laps & User Dwell Analytics */}
       {(activeTab === 'time_laps' || activeTab === 'all_views') && (

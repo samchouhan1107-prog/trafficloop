@@ -3,11 +3,11 @@ import { useAuth } from '../context/AuthContext.js';
 import { useToast } from '../context/ToastContext.js';
 import { api } from '../services/api.js';
 import { StatCard } from '../components/common/StatCard.js';
-import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import { CampaignCard } from '../components/campaigns/CampaignCard.js';
 import { CampaignFormModal } from '../components/campaigns/CampaignFormModal.js';
 import { CampaignStatsModal } from '../components/campaigns/CampaignStatsModal.js';
 import { CampaignSettingsModal } from '../components/campaigns/CampaignSettingsModal.js';
+import { CampaignUpgradeModal } from '../components/campaigns/CampaignUpgradeModal.js';
 import { BuyCreditsModal } from '../components/payments/BuyCreditsModal.js';
 import { CurrencyValuationCard } from '../components/common/CurrencyValuationCard.js';
 import { DailySignInBonusModal } from '../components/dashboard/DailySignInBonusModal.js';
@@ -36,6 +36,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [selectedStatsCampaignId, setSelectedStatsCampaignId] = useState<string | null>(null);
   const [budgetModalCampaign, setBudgetModalCampaign] = useState<Campaign | null>(null);
   const [settingsModalCampaign, setSettingsModalCampaign] = useState<Campaign | null>(null);
+  const [upgradeModalCampaign, setUpgradeModalCampaign] = useState<Campaign | null>(null);
   const [addBudgetAmount, setAddBudgetAmount] = useState<number>(10);
   const [isAddingBudget, setIsAddingBudget] = useState(false);
 
@@ -73,13 +74,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     }
   };
 
-  // Initial load
   useEffect(() => {
     loadDashboard();
+    const interval = setInterval(() => {
+      loadDashboard(true);
+    }, 6000);
+    return () => clearInterval(interval);
   }, []);
-
-  // Poll every 6s while the tab is visible (pauses automatically when hidden)
-  useVisibilityPoll(() => loadDashboard(true), 6000, []);
 
   const handleClaimBonusOption = async (optionId: string = 'ten_thousand_visits_boost') => {
     try {
@@ -159,6 +160,24 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
   const handleTestSurf = (campaign: Campaign) => {
     onNavigate(`/surf?campaignId=${campaign.id}`);
+  };
+
+  const handleActivateTestCampaign = async (campaignId: string) => {
+    try {
+      const res = await api.transitionCampaignStatus(campaignId, 'active');
+      loadDashboard(true);
+      toast({
+        title: '🎉 Campaign Activated Live!',
+        description: res.message || 'Campaign is now actively receiving verified traffic.',
+        variant: 'success'
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Activation Failed',
+        description: err.message,
+        variant: 'error'
+      });
+    }
   };
 
   const handleAddBudgetSubmit = async (e: React.FormEvent) => {
@@ -352,6 +371,8 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                 onDispatchTraffic={handleDispatchTraffic}
                 onTestSurf={handleTestSurf}
                 onOpenSettings={(c) => setSettingsModalCampaign(c)}
+                onActivateTestCampaign={handleActivateTestCampaign}
+                onOpenUpgradeModal={(c) => setUpgradeModalCampaign(c)}
               />
             ))}
           </div>
@@ -546,6 +567,18 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         status={dailyBonusStatus}
         onClaim={handleClaimBonusOption}
         isClaiming={isClaimingBonus}
+      />
+
+      {/* Campaign Upgrade & Category Modal */}
+      <CampaignUpgradeModal
+        isOpen={!!upgradeModalCampaign}
+        campaign={upgradeModalCampaign}
+        onClose={() => setUpgradeModalCampaign(null)}
+        onUpgraded={() => {
+          setUpgradeModalCampaign(null);
+          loadDashboard(true);
+          refreshUser();
+        }}
       />
     </div>
   );

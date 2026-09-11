@@ -28,30 +28,17 @@ export function createRateLimiter(maxRequests: number, windowMs: number, message
     const record = rateLimitMap.get(key);
 
     if (!record || now > record.resetTime) {
-      const resetAt = now + windowMs;
-      rateLimitMap.set(key, { count: 1, resetTime: resetAt });
-      // Inform clients about their allowance so they can pace requests precisely
-      res.setHeader('X-RateLimit-Limit', String(maxRequests));
-      res.setHeader('X-RateLimit-Remaining', String(maxRequests - 1));
-      res.setHeader('X-RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+      rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
       next();
       return;
     }
 
     if (record.count >= maxRequests) {
-      const retryAfterSec = Math.max(1, Math.ceil((record.resetTime - now) / 1000));
-      res.setHeader('Retry-After', String(retryAfterSec));
-      res.setHeader('X-RateLimit-Limit', String(maxRequests));
-      res.setHeader('X-RateLimit-Remaining', '0');
-      res.setHeader('X-RateLimit-Reset', String(Math.ceil(record.resetTime / 1000)));
-      res.status(429).json({ error: message, retryAfterSeconds: retryAfterSec });
+      res.status(429).json({ error: message, retryAfterSeconds: Math.ceil((record.resetTime - now) / 1000) });
       return;
     }
 
     record.count++;
-    res.setHeader('X-RateLimit-Limit', String(maxRequests));
-    res.setHeader('X-RateLimit-Remaining', String(maxRequests - record.count));
-    res.setHeader('X-RateLimit-Reset', String(Math.ceil(record.resetTime / 1000)));
     next();
   };
 }

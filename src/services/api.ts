@@ -1,4 +1,15 @@
-import { User, Campaign, Visit, CreditTransaction, UserStats, PlatformStats, SurfSessionPayload, SurfCompleteResult, SurfEngineDiagnostics, PaymentOrder, CreditPackage, BankDetails, MarketRates, CreditValuation, CurrencyConversionResult, WeeklyAnalyticsData, DailyBonusStatus, ClaimDailyBonusResponse, GeoTrafficDistributionData, TrafficDebuggerRequest, TrafficDebuggerResult, GlobalTrafficLogResponse, UrlBrowseReportResponse, TimeLapAnalyticsResponse } from '../types.js';
+import { User, Campaign, Visit, CreditTransaction, UserStats, PlatformStats, SurfSessionPayload, SurfCompleteResult, SurfEngineDiagnostics, RegisterClickResult, PaymentOrder, CreditPackage, BankDetails, MarketRates, CreditValuation, CurrencyConversionResult, WeeklyAnalyticsData, DailyBonusStatus, ClaimDailyBonusResponse, GeoTrafficDistributionData, TrafficDebuggerRequest, TrafficDebuggerResult, GlobalTrafficLogResponse, UrlBrowseReportResponse, TimeLapAnalyticsResponse, CyclePoolResponse, TrafficStrengthTelemetry, CycleSite } from '../types.js';
+
+export class ApiError extends Error {
+  status?: number;
+  code?: string;
+  constructor(message: string, status?: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
 
 class ApiClient {
   private token: string | null = null;
@@ -34,22 +45,40 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(endpoint, {
-      ...options,
-      headers
-    });
+    // 15-second request timeout to prevent hanging connections or infinite spinners
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const data = await response.json().catch(() => ({}));
+    try {
+      const response = await fetch(endpoint, {
+        ...options,
+        headers,
+        signal: options.signal || controller.signal
+      });
 
-    if (!response.ok) {
-      const err: any = new Error(data.error || data.message || `Request failed with status ${response.status}`);
-      err.code = data.code;
-      err.remainingSeconds = data.remainingSeconds;
-      err.requiredDwellSeconds = data.requiredDwellSeconds;
-      throw err;
+      clearTimeout(timeoutId);
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new ApiError(
+          data.error || data.message || `Request failed with status ${response.status}`,
+          response.status,
+          data.code
+        );
+      }
+
+      return data as T;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new ApiError('Request timed out. Please check your network connection.', 408, 'TIMEOUT');
+      }
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      throw new ApiError(err.message || 'Network request failed', 0, 'NETWORK_ERROR');
     }
-
-    return data as T;
   }
 
   // System
@@ -89,6 +118,16 @@ class ApiClient {
 
   async getMe() {
     return this.request<{ user: User }>('/api/auth/me');
+  }
+
+  async refreshToken() {
+    const res = await this.request<{ success: boolean; token: string; expiresAt: string; user: User }>('/api/auth/refresh', {
+      method: 'POST'
+    });
+    if (res.token) {
+      this.setToken(res.token);
+    }
+    return res;
   }
 
   async updateProfile(data: { name?: string; location?: string; preferredCurrency?: string }) {
@@ -136,6 +175,9 @@ class ApiClient {
     dailyVisitLimit?: number;
     targetLocations?: string;
     deviceTargeting?: string;
+    ga4MeasurementId?: string | null;
+    ga4ApiSecret?: string | null;
+    interactiveClicksEnabled?: boolean;
   }) {
     return this.request<{ message: string; campaign: Campaign; reviewStatus: string }>('/api/campaigns', {
       method: 'POST',
@@ -174,16 +216,85 @@ class ApiClient {
   async updateCampaignSettings(id: string, data: {
     title?: string;
     url?: string;
+    urls?: string[] | string;
     targetLocations?: string;
     deviceTargeting?: string;
     category?: string;
     dailyVisitLimit?: number;
     durationSeconds?: number;
+    ga4MeasurementId?: string | null;
+    ga4ApiSecret?: string | null;
+    interactiveClicksEnabled?: boolean;
+    autoProgress?: boolean;
+    auto_progress?: boolean | number;
+    status?: string;
   }) {
     return this.request<{ message: string; campaign: Campaign }>(`/api/campaigns/${id}/settings`, {
       method: 'PATCH',
       body: JSON.stringify(data)
     });
+  }
+
+  async stepCampaignVisit(id: string) {
+    return this.request<{
+      success: boolean;
+      result: {
+        success: boolean;
+        visitId: string;
+        targetUrl: string;
+        country: string;
+        httpStatus: number;
+        spentCredits: number;
+        remainingBudget: number;
+        totalVisits: number;
+      };
+    }>(`/api/campaigns/${id}/step`, {
+      method: 'POST'
+    });
+  }
+
+  async getCampaignVisits(id: string) {
+    return this.request<{
+      visits: Array<{
+        id: string;
+        campaign_id: string;
+        target_url: string;
+        visitor_country: string;
+        visitor_country_code: string;
+        visitor_device: string;
+        duration_seconds: number;
+        actual_dwell_seconds: number;
+        credits_charged: number;
+        status: string;
+        http_status: number;
+        ip_address: string;
+        created_at: string;
+        completed_at: string;
+      }>;
+    }>(`/api/campaigns/${id}/visits`);
+  }
+
+  async triggerSchedulerTick() {
+    return this.request<{
+      success: boolean;
+      result: {
+        timestamp: string;
+        activeCampaignsCount: number;
+        deliveredCount: number;
+        dispatchedVisits: any[];
+      };
+    }>(`/api/campaigns/scheduler/tick`, {
+      method: 'POST'
+    });
+  }
+
+  async getSchedulerStatus() {
+    return this.request<{
+      isRunning: boolean;
+      activeCampaignsCount: number;
+      lastTickAt: string | null;
+      intervalSeconds: number;
+    }>(`/api/campaigns/scheduler/status`);
   }
 
   async addCampaignBudget(id: string, amount: number) {
@@ -309,8 +420,71 @@ class ApiClient {
     });
   }
 
+  async registerSurfClick(data: {
+    sessionToken: string;
+    clickType?: 'in_frame' | 'companion_tab' | 'quick_action';
+    linkUrl?: string;
+    linkText?: string;
+  }): Promise<RegisterClickResult> {
+    return this.request<RegisterClickResult>('/api/surf/register-click', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async sendSurfHeartbeat(sessionToken: string, isVisible: boolean, isFocused: boolean) {
+    return this.request<{
+      success: boolean;
+      activeDwellSeconds: number;
+      backgroundDwellSeconds: number;
+      requiredSeconds: number;
+      isEligible: boolean;
+    }>('/api/surf/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify({ sessionToken, isVisible, isFocused })
+    });
+  }
+
+  async inspectUrl(url: string, campaignId?: string) {
+    const params = new URLSearchParams({ url });
+    if (campaignId) params.set('campaignId', campaignId);
+    return this.request<{
+      campaignId: string;
+      url: string;
+      isAvailable: boolean;
+      httpStatus: number;
+      responseTimeMs: number;
+      canEmbedInIframe: boolean;
+      xFrameOptions: string | null;
+      cspFrameAncestors: string | null;
+      healthStatus: 'healthy' | 'degraded' | 'unreachable';
+      error: string | null;
+    }>(`/api/surf/inspect-url?${params.toString()}`);
+  }
+
   async getEngineDiagnostics(): Promise<SurfEngineDiagnostics> {
     return this.request<SurfEngineDiagnostics>('/api/surf/engine-diagnostics');
+  }
+
+  // Live Cycle & Exchange Pool
+  async getCyclePool(): Promise<CyclePoolResponse> {
+    return this.request<CyclePoolResponse>('/api/cycle');
+  }
+
+  async getCycleSites(): Promise<{ sites: CycleSite[]; total: number; updatedAt: string; poolVersion: number }> {
+    return this.request<{ sites: CycleSite[]; total: number; updatedAt: string; poolVersion: number }>('/api/cycle/sites');
+  }
+
+  async getCycleVersion(): Promise<{ poolVersion: number; total: number; updatedAt: string }> {
+    return this.request<{ poolVersion: number; total: number; updatedAt: string }>('/api/cycle/version');
+  }
+
+  async getTrafficStrength(): Promise<TrafficStrengthTelemetry> {
+    return this.request<TrafficStrengthTelemetry>('/api/cycle/traffic-strength');
+  }
+
+  async getActiveCampaigns(): Promise<{ campaigns: CycleSite[]; sites: CycleSite[]; total: number; eligibleTotal: number; poolVersion: number; updatedAt: string }> {
+    return this.request<{ campaigns: CycleSite[]; sites: CycleSite[]; total: number; eligibleTotal: number; poolVersion: number; updatedAt: string }>('/api/campaigns/active');
   }
 
   // Credits & Currency Conversion
@@ -619,6 +793,99 @@ class ApiClient {
     return this.request<{ message: string; state: import('../types.js').TriStationEngineResponse }>('/api/tri-station/rotational-class', {
       method: 'POST',
       body: JSON.stringify({ rotationalClass, stationId })
+    });
+  }
+
+  // Google Analytics (GA4) Diagnostics & Realtime Verification
+  async scanWebsiteForGA4Tags(url: string) {
+    return this.request<import('../types.js').GA4TagScanResult>('/api/analytics/ga4-scan', {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    });
+  }
+
+  async sendGA4TestPing(data: { url: string; measurementId?: string; campaignId?: string; countryCode?: string }) {
+    return this.request<import('../types.js').GA4TestPingResult>('/api/analytics/ga4-test-ping', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async getGA4DeliveryLogs(campaignId?: string, limit: number = 30) {
+    const params = new URLSearchParams();
+    if (campaignId) params.set('campaignId', campaignId);
+    if (limit) params.set('limit', String(limit));
+    return this.request<{ logs: import('../types.js').GA4DeliveryLog[] }>(`/api/analytics/ga4-delivery-logs?${params.toString()}`);
+  }
+
+  // Global Notifications & Activity Sentinel
+  async getNotifications(limit: number = 40) {
+    return this.request<{ notifications: import('../types.js').AppNotification[]; unreadCount: number }>(`/api/notifications?limit=${limit}`);
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request<{ success: boolean; unreadCount: number }>(`/api/notifications/${id}/read`, {
+      method: 'POST'
+    });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request<{ success: boolean; updatedCount: number; unreadCount: number }>('/api/notifications/read-all', {
+      method: 'POST'
+    });
+  }
+
+  async deleteNotification(id: string) {
+    return this.request<{ success: boolean; unreadCount: number }>(`/api/notifications/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async clearReadNotifications() {
+    return this.request<{ success: boolean; clearedCount: number; unreadCount: number }>('/api/notifications/clear', {
+      method: 'POST'
+    });
+  }
+
+  async triggerTestNotification(eventType: 'campaign_test_to_active' | 'user_inactivity' | 'user_reactivated' | 'system', campaignId?: string, reason?: string) {
+    return this.request<{ success: boolean; notification: import('../types.js').AppNotification; unreadCount: number }>('/api/notifications/test-event', {
+      method: 'POST',
+      body: JSON.stringify({ eventType, campaignId, reason })
+    });
+  }
+
+  // Campaign Status Transition & Upgrades
+  async transitionCampaignStatus(id: string, status: 'active' | 'test' | 'paused') {
+    return this.request<{ message: string; campaign: Campaign; notification?: import('../types.js').AppNotification }>(`/api/campaigns/${id}/transition-status`, {
+      method: 'POST',
+      body: JSON.stringify({ status })
+    });
+  }
+
+  async upgradeCampaign(id: string, data: { tier?: string; category?: string; boostCredits?: number }) {
+    return this.request<{ message: string; campaign: Campaign; notification?: import('../types.js').AppNotification }>(`/api/campaigns/${id}/upgrade`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  // User Activity & Inactivity Sentinel
+  async heartbeatActivity() {
+    return this.request<{ status: string; last_active_at: string }>('/api/auth/heartbeat', {
+      method: 'POST'
+    });
+  }
+
+  async reactivateAccount() {
+    return this.request<{ message: string; user: User; notification?: import('../types.js').AppNotification }>('/api/auth/reactivate', {
+      method: 'POST'
+    });
+  }
+
+  async setAccountIdle(reason?: string) {
+    return this.request<{ message: string; user: User; notification?: import('../types.js').AppNotification }>('/api/auth/set-idle', {
+      method: 'POST',
+      body: JSON.stringify({ reason })
     });
   }
 }

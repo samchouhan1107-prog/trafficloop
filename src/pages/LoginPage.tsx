@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext.js';
-import { Flame, Lock, Mail, AlertCircle, ArrowRight } from 'lucide-react';
+import { Flame, Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, UserCheck } from 'lucide-react';
 
 interface LoginPageProps {
   onNavigate: (path: string) => void;
@@ -27,6 +27,21 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
     }
   };
 
+  const handleQuickDemo = async (demoEmail: string, demoPass: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    setError(null);
+    try {
+      setIsLoading(true);
+      await login(demoEmail, demoPass);
+      onNavigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="flex min-h-[calc(100vh-14rem)] items-center justify-center px-4 py-12">
       <div className="w-full max-w-md space-y-6">
@@ -37,6 +52,32 @@ export function LoginPage({ onNavigate }: LoginPageProps) {
           </div>
           <h2 className="mt-4 text-2xl font-black tracking-tight text-white">Sign In to TrafficLoop</h2>
           <p className="mt-1 text-xs text-slate-400">Access your traffic exchange campaigns and credit balance</p>
+        </div>
+
+        {/* Quick Demo Credentials Panel */}
+        <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4 text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-cyan-300 mb-2">
+            <UserCheck className="h-4 w-4" />
+            <span>Fast One-Click Demo Access:</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleQuickDemo('demo@webzonebw.com', 'demo123456')}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/90 py-2 font-semibold text-slate-200 hover:border-cyan-400 hover:text-white transition-all text-[11px]"
+            >
+              <span>Demo Surfer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleQuickDemo('admin@trafficloop.webzonebw.com', 'admin123456')}
+              className="flex items-center justify-center gap-1.5 rounded-lg border border-indigo-800/80 bg-indigo-950/60 py-2 font-semibold text-indigo-300 hover:border-indigo-400 hover:text-white transition-all text-[11px]"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>Admin Portal</span>
+            </button>
+          </div>
         </div>
 
         {/* Form */}

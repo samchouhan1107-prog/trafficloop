@@ -4,6 +4,7 @@ import { CreditLedgerService } from './creditLedgerService.js';
 import { CurrencyConversionService } from './currencyConversionService.js';
 import { RewardService } from './rewardService.js';
 import { GA4Service } from './ga4Service.js';
+import { CampaignPoolService } from './campaignPoolService.js';
 import { SurfSessionPayload, SurfCompleteResult, SurfEngineDiagnostics } from '../../src/types.js';
 
 // Random pool of human verification challenges (Splash / TrafficPeak style)
@@ -62,7 +63,7 @@ export class TrafficExchangeService {
       `).run(todayStr, todayStr);
     } catch {}
 
-    // 1. First Tier: Active campaigns not owned by user, with remaining budget, not in cooldown
+    // 1. First Tier: Active campaigns not owned by user, with remaining budget, not in cooldown, healthy or has fallback
     let query = `
       SELECT c.*, u.name as owner_name, u.role as owner_role
       FROM campaigns c
@@ -71,6 +72,7 @@ export class TrafficExchangeService {
         AND c.user_id != ?
         AND (c.credit_budget - c.spent_credits) >= c.credit_cost_per_visit
         AND (c.daily_visit_limit = 0 OR c.daily_visit_limit >= 50000 OR c.today_visits_received < c.daily_visit_limit)
+        AND (c.health_status IS NULL OR c.health_status != 'unreachable' OR (c.fallback_url IS NOT NULL AND LENGTH(c.fallback_url) > 8))
     `;
 
     const queryParams: any[] = [userId];
@@ -219,33 +221,6 @@ export class TrafficExchangeService {
     const isNetworkShowcase = campaign.user_id === 'system-network-node' || campaign.id.startsWith('showcase-');
     const isPreviewMode = campaignData.matchingMode === 'sandbox_preview' || campaign.user_id === userId;
 
-    // Compute next eligibility after adaptive cooldown for this user's latest completed visit
-    let nextCampaignDueSeconds: number | undefined;
-    try {
-      const settings = db.prepare('SELECT cooldown_between_same_campaign_mins FROM platform_settings WHERE id = ?').get('default') as {
-        cooldown_between_same_campaign_mins: number;
-      } | undefined;
-      const baseCooldownMins = settings?.cooldown_between_same_campaign_mins || 15;
-      const totalActive = (db.prepare("SELECT COUNT(*) as c FROM campaigns WHERE status = 'active'").get() as any)?.c || 0;
-      let effMins = baseCooldownMins;
-      if (totalActive <= 3) effMins = 0;
-      else if (totalActive <= 8) effMins = 2;
-      else effMins = Math.min(baseCooldownMins, 10);
-
-      const lastVisit = db.prepare(`
-        SELECT completed_at FROM visits
-        WHERE visitor_user_id = ? AND status = 'completed'
-        ORDER BY completed_at DESC LIMIT 1
-      `).get(userId) as { completed_at: string } | undefined;
-
-      if (lastVisit?.completed_at && effMins > 0) {
-        const elapsedMs = now.getTime() - new Date(lastVisit.completed_at).getTime();
-        nextCampaignDueSeconds = Math.max(0, Math.ceil(effMins * 60 - elapsedMs / 1000));
-      }
-    } catch {
-      nextCampaignDueSeconds = undefined;
-    }
-
     // Generate human verification challenge
     const shuffled = [...CHALLENGE_ICONS].sort(() => 0.5 - Math.random());
     const targetChallenge = shuffled[0];
@@ -344,10 +319,11 @@ export class TrafficExchangeService {
     const insertVisit = db.prepare(`
       INSERT INTO visits (
         id, campaign_id, visitor_user_id, owner_user_id,
-        duration_seconds, actual_dwell_seconds, credits_earned,
+        duration_seconds, actual_dwell_seconds, active_dwell_seconds, background_dwell_seconds,
+        last_heartbeat_at, heartbeat_count, observation_status, credits_earned,
         credits_charged, status, verification_code, session_token,
         ip_address, user_agent, visitor_country, visitor_country_code, visitor_device, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     insertVisit.run(
@@ -357,6 +333,11 @@ export class TrafficExchangeService {
       campaign.user_id,
       campaign.duration_seconds,
       0,
+      0.0,
+      0.0,
+      now.toISOString(),
+      0,
+      'PENDING',
       finalReward,
       isPreviewMode ? 0.0 : baseReward,
       'started',
@@ -370,21 +351,28 @@ export class TrafficExchangeService {
       now.toISOString()
     );
 
+    const isFallbackActive = campaign.health_status === 'unreachable' && !!campaign.fallback_url;
+    const activeUrl = isFallbackActive ? campaign.fallback_url : campaign.url;
+
     return {
       session_token: sessionToken,
       campaign: {
         id: campaign.id,
         title: campaign.title,
-        url: campaign.url,
+        url: activeUrl,
         duration_seconds: campaign.duration_seconds,
         credit_reward: finalReward,
         category: campaign.category,
         is_network_showcase: isNetworkShowcase,
-        preview_mode: isPreviewMode
+        preview_mode: isPreviewMode,
+        is_fallback: isFallbackActive,
+        canEmbedInIframe: CampaignPoolService.canEmbedUrl(activeUrl),
+        interactive_clicks_enabled: campaign.interactive_clicks_enabled !== 0,
+        total_clicks_received: campaign.total_clicks_received || 0
       },
+      clicks_registered: 0,
+      click_bonus_rate: 0.05,
       server_timestamp: now.getTime(),
-      required_dwell_seconds: campaign.duration_seconds,
-      next_campaign_due_seconds: nextCampaignDueSeconds,
       verification_challenge: {
         prompt: `Click the "${targetChallenge.label}" icon to claim visit reward`,
         target_id: targetChallenge.id,
@@ -399,6 +387,171 @@ export class TrafficExchangeService {
         multiplier: multiplier,
         mystery_milestone_target: (Math.floor(streakCount / 10) + 1) * 10
       }
+    };
+  }
+
+  /**
+   * Registers a visitor click on the active surfing webpage, awards engagement credit bonus,
+   * and dispatches a verified GA4 'click' event to the campaign owner's analytics property.
+   */
+  static registerVisitorClick(
+    userId: string,
+    sessionToken: string,
+    clickType: 'in_frame' | 'companion_tab' | 'quick_action' = 'in_frame',
+    linkUrl?: string,
+    linkText?: string
+  ) {
+    const visit = db.prepare(`
+      SELECT v.*, c.title as campaign_title, c.url as campaign_url, c.user_id as campaign_owner_id,
+             c.ga4_measurement_id
+      FROM visits v
+      JOIN campaigns c ON v.campaign_id = c.id
+      WHERE v.session_token = ?
+    `).get(sessionToken) as any;
+
+    if (!visit) {
+      throw new Error('Invalid or expired visit session token');
+    }
+
+    if (visit.visitor_user_id !== userId) {
+      throw new Error('Unauthorized visit session owner');
+    }
+
+    if (visit.status !== 'started') {
+      throw new Error('Session is not active for click recording');
+    }
+
+    const currentClicks = visit.clicks_count || 0;
+    const newClicks = currentClicks + 1;
+    const nowIso = new Date().toISOString();
+
+    // Reward: +0.05 credits per verified click, max 5 clicks rewarded (+0.25 credits bonus)
+    const clickBonus = currentClicks < 5 ? 0.05 : 0.0;
+    const newCreditsEarned = Number((visit.credits_earned + clickBonus).toFixed(2));
+
+    // Update visits record
+    db.prepare(`
+      UPDATE visits
+      SET clicks_count = ?, last_click_at = ?, credits_earned = ?
+      WHERE id = ?
+    `).run(newClicks, nowIso, newCreditsEarned, visit.id);
+
+    // Increment campaigns total_clicks_received
+    db.prepare(`
+      UPDATE campaigns
+      SET total_clicks_received = COALESCE(total_clicks_received, 0) + 1
+      WHERE id = ?
+    `).run(visit.campaign_id);
+
+    // Dispatch real GA4 'click' event to Google Analytics
+    const effectiveLinkUrl = linkUrl || visit.campaign_url;
+    GA4Service.trackWebsiteClick({
+      userId: visit.campaign_owner_id,
+      campaignId: visit.campaign_id,
+      targetUrl: visit.campaign_url,
+      linkUrl: effectiveLinkUrl,
+      linkText: linkText || 'Webpage Visitor Engagement Click',
+      measurementId: visit.ga4_measurement_id || null,
+      geoIp: visit.ip_address || '103.21.244.17',
+      countryCode: visit.visitor_country_code || 'IN',
+      countryName: visit.visitor_country || 'India',
+      city: visit.visitor_country_code === 'IN' ? 'Mumbai' : 'Global Hub',
+      userAgent: visit.user_agent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      source: `exchange_surf_${clickType}`
+    }).catch(() => {});
+
+    return {
+      success: true,
+      clicksCount: newClicks,
+      bonusCredits: clickBonus,
+      totalCreditsEarned: newCreditsEarned,
+      message: clickBonus > 0
+        ? `🖱️ Verified click registered on webpage! +${clickBonus.toFixed(2)} engagement bonus added to visit reward.`
+        : `🖱️ Click registered! Webpage engagement logged in GA4 Realtime.`,
+      ga4Tracked: true,
+      details: `Dispatched to GA4 Realtime for ${visit.campaign_title || visit.campaign_url}`
+    };
+  }
+
+  /**
+   * Records active dwell time heartbeat from the surf client.
+   * Tracks active vs background dwell time based on tab visibility and window focus.
+   */
+  static recordHeartbeat(
+    userId: string,
+    sessionToken: string,
+    isVisible: boolean,
+    isFocused: boolean
+  ): { success: boolean; activeDwellSeconds: number; backgroundDwellSeconds: number; requiredSeconds: number; isEligible: boolean } {
+    const visit = db.prepare(`
+      SELECT id, visitor_user_id, status, duration_seconds, active_dwell_seconds, background_dwell_seconds,
+             last_heartbeat_at, heartbeat_count, created_at
+      FROM visits
+      WHERE session_token = ?
+    `).get(sessionToken) as any;
+
+    if (!visit) {
+      throw new Error('Invalid visit session token');
+    }
+
+    if (visit.visitor_user_id !== userId) {
+      throw new Error('Unauthorized visit session owner');
+    }
+
+    if (visit.status !== 'started') {
+      return {
+        success: false,
+        activeDwellSeconds: Number(visit.active_dwell_seconds || 0),
+        backgroundDwellSeconds: Number(visit.background_dwell_seconds || 0),
+        requiredSeconds: Number(visit.duration_seconds || 15),
+        isEligible: false
+      };
+    }
+
+    const now = Date.now();
+    const lastHeartbeatTime = visit.last_heartbeat_at 
+      ? new Date(visit.last_heartbeat_at).getTime() 
+      : new Date(visit.created_at).getTime();
+
+    // Calculate delta since last heartbeat (cap at 4.0s to avoid spoofed leaps)
+    const rawDelta = (now - lastHeartbeatTime) / 1000;
+    const delta = Math.min(Math.max(0.5, rawDelta), 4.0);
+
+    let activeDwell = Number(visit.active_dwell_seconds || 0);
+    let backgroundDwell = Number(visit.background_dwell_seconds || 0);
+
+    // Active dwell requires tab visibility and window focus
+    if (isVisible && isFocused) {
+      activeDwell += delta;
+    } else {
+      backgroundDwell += delta;
+    }
+
+    const newHeartbeatCount = Number(visit.heartbeat_count || 0) + 1;
+    const requiredSeconds = Number(visit.duration_seconds || 15);
+    const isEligible = activeDwell >= (requiredSeconds - 2.0);
+
+    db.prepare(`
+      UPDATE visits
+      SET active_dwell_seconds = ?,
+          background_dwell_seconds = ?,
+          last_heartbeat_at = ?,
+          heartbeat_count = ?
+      WHERE id = ?
+    `).run(
+      Number(activeDwell.toFixed(2)),
+      Number(backgroundDwell.toFixed(2)),
+      new Date(now).toISOString(),
+      newHeartbeatCount,
+      visit.id
+    );
+
+    return {
+      success: true,
+      activeDwellSeconds: Number(activeDwell.toFixed(1)),
+      backgroundDwellSeconds: Number(backgroundDwell.toFixed(1)),
+      requiredSeconds,
+      isEligible
     };
   }
 
@@ -438,31 +591,55 @@ export class TrafficExchangeService {
     if (challengeAnswer !== visit.verification_code) {
       const expectedItem = CHALLENGE_ICONS.find(c => c.id === visit.verification_code);
       const expectedName = expectedItem ? expectedItem.label : 'requested';
+
+      // Log failure in visit and ledger as unverified
+      db.prepare(`
+        UPDATE visits
+        SET observation_status = 'UNVERIFIED',
+            verification_notes = ?
+        WHERE id = ?
+      `).run(`Challenge icon mismatch: expected ${expectedName}`, visit.id);
+
+      try {
+        db.prepare(`
+          INSERT INTO reward_ledger (id, user_id, eligibility_source, qualifying_event_id, amount_inr, amount_credits, status, notes, created_at)
+          VALUES (?, ?, 'failed_verification', ?, 0, 0, 'REJECTED', ?, ?)
+        `).run(`rw-${crypto.randomUUID()}`, userId, visit.id, `Icon mismatch: expected ${expectedName}`, new Date().toISOString());
+      } catch {}
+
       throw new Error(`Incorrect icon selected. Please click the "${expectedName}" icon to claim your reward.`);
     }
 
-    // 2. Server-Side Duration Check (Anti-Abuse with network jitter tolerance)
+    // 2. Spend-Time Calculation: Active Dwell & Anti-Abuse Check
     const startTime = new Date(visit.created_at).getTime();
     const nowTime = Date.now();
     const serverElapsedSeconds = (nowTime - startTime) / 1000;
-    const requiredSeconds = visit.duration_seconds;
+    const requiredSeconds = Number(visit.duration_seconds || 15);
+    const heartbeatCount = Number(visit.heartbeat_count || 0);
+    const activeDwellSeconds = Number(visit.active_dwell_seconds || 0);
 
-    // Grace allowance of 2.5s for mobile/international network transport and device clock variance
-    if (serverElapsedSeconds < (requiredSeconds - 2.5)) {
-      const remainingSeconds = Math.max(1, Math.ceil(requiredSeconds - serverElapsedSeconds));
-      const err = new Error(`Insufficient viewing duration. ${remainingSeconds} second${remainingSeconds > 1 ? 's' : ''} remaining.`) as any;
-      err.code = 'INSUFFICIENT_DWELL';
-      err.remainingSeconds = remainingSeconds;
-      err.requiredDwellSeconds = requiredSeconds;
-      throw err;
+    // If client reported heartbeats, use verified active dwell; otherwise check server elapsed time with 2.5s tolerance
+    const effectiveDwell = heartbeatCount > 0 ? activeDwellSeconds : serverElapsedSeconds;
+
+    if (effectiveDwell < (requiredSeconds - 2.5)) {
+      const remainingSeconds = Math.max(1, Math.ceil(requiredSeconds - effectiveDwell));
+      
+      db.prepare(`
+        UPDATE visits
+        SET observation_status = 'PENDING',
+            verification_notes = ?
+        WHERE id = ?
+      `).run(`Insufficient active viewing: ${effectiveDwell.toFixed(1)}s / ${requiredSeconds}s required`, visit.id);
+
+      throw new Error(`Insufficient active viewing duration. Please actively view for ${remainingSeconds} more second${remainingSeconds > 1 ? 's' : ''}.`);
     }
 
-    const actualDwell = Math.max(requiredSeconds, Math.round(serverElapsedSeconds));
+    const actualDwell = Math.max(requiredSeconds, Math.round(effectiveDwell));
     const nowIso = new Date().toISOString();
 
     // 3. Atomic Exchange Execution
     const visitorReward = visit.credits_earned;
-    const { newBalance } = CreditLedgerService.recordTransaction(
+    const txResult = CreditLedgerService.recordTransaction(
       userId,
       visitorReward,
       'visit_reward',
@@ -482,12 +659,51 @@ export class TrafficExchangeService {
       );
     }
 
-    // Update visit record
+    // Update visit record to completed and VERIFIED
     db.prepare(`
       UPDATE visits
-      SET status = 'completed', actual_dwell_seconds = ?, completed_at = ?
+      SET status = 'completed',
+          observation_status = 'VERIFIED',
+          actual_dwell_seconds = ?,
+          verification_notes = 'Verified active dwell completion',
+          completed_at = ?
       WHERE id = ?
     `).run(actualDwell, nowIso, visit.id);
+
+    // Synchronize into reward_ledger atomically as CLAIMED
+    const inrValuation = CurrencyConversionService.calculateCreditValue(visitorReward, 'INR');
+    const rewardId = `rw-${crypto.randomUUID()}`;
+    try {
+      db.prepare(`
+        INSERT INTO reward_ledger (
+          id, user_id, eligibility_source, qualifying_event_id,
+          amount_inr, amount_credits, status, transaction_id, notes, created_at, claimed_at
+        ) VALUES (?, ?, 'verified_surf_dwell', ?, ?, ?, 'CLAIMED', ?, ?, ?, ?)
+      `).run(
+        rewardId,
+        userId,
+        visit.id,
+        inrValuation.inrValue,
+        visitorReward,
+        txResult.transactionId,
+        `Verified active dwell (${actualDwell}s) on ${visit.campaign_title || 'TrafficLoop Network Site'}`,
+        visit.created_at || nowIso,
+        nowIso
+      );
+    } catch (rErr: any) {
+      if (!rErr?.message?.includes('UNIQUE')) {
+        console.warn('[RewardLedger Sync Warning]:', rErr);
+      }
+    }
+
+    console.log('[REWARD_FLOW] Completed verified visit:', {
+      visitId: visit.id,
+      visitorId: userId,
+      actualDwell,
+      rewardCredits: visitorReward,
+      rewardInr: inrValuation.inrValue,
+      transactionId: txResult.transactionId
+    });
 
     // Dispatch real-time Google Analytics (GA4) hit
     const campaignDetails = db.prepare('SELECT url, title, ga4_measurement_id FROM campaigns WHERE id = ?').get(visit.campaign_id) as any;
@@ -585,19 +801,25 @@ export class TrafficExchangeService {
 
     // Check if next campaign is available
     const nextCampaign = this.getEligibleCampaign(userId, visit.campaign_id);
+    const clicksCount = visit.clicks_count || 0;
+    const clickBonusEarned = Math.min(clicksCount, 5) * 0.05;
 
     return {
       success: true,
       creditsEarned: visitorReward,
-      newBalance: newBalance + streakBonus,
+      newBalance: txResult.newBalance + streakBonus,
       nextCampaignAvailable: nextCampaign !== null,
-      message: `Verified visit completed! +${visitorReward.toFixed(2)} credits awarded.`,
+      message: clicksCount > 0
+        ? `Verified visit completed with ${clicksCount} interactive click${clicksCount > 1 ? 's' : ''}! +${visitorReward.toFixed(2)} credits awarded.`
+        : `Verified visit completed! +${visitorReward.toFixed(2)} credits awarded.`,
       streakCount,
       streakBonus,
+      clicksCount,
+      clickBonusEarned,
       mysteryReward,
       exchangeRatio: '1:1 Fair Ratio',
-      dwellVerifiedSeconds: actualDwell,
-      requiredDwellSeconds: requiredSeconds
+      visitId: visit.id,
+      dwellSeconds: actualDwell
     };
   }
 

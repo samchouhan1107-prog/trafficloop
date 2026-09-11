@@ -8,9 +8,9 @@ import { CampaignFormModal } from '../components/campaigns/CampaignFormModal.js'
 import { CampaignStatsModal } from '../components/campaigns/CampaignStatsModal.js';
 import { CampaignSettingsModal } from '../components/campaigns/CampaignSettingsModal.js';
 import { CampaignVerifySettingsModal } from '../components/campaigns/CampaignVerifySettingsModal.js';
+import { CampaignUpgradeModal } from '../components/campaigns/CampaignUpgradeModal.js';
 import { BuyCreditsModal } from '../components/payments/BuyCreditsModal.js';
 import { Modal } from '../components/common/Modal.js';
-import { useVisibilityPoll } from '../hooks/useVisibilityPoll.js';
 import { Plus, Search, Filter, Globe, Sparkles, Building2, Zap, ShieldCheck, MapPin, CheckCircle2, ArrowRight } from 'lucide-react';
 import { formatCredits } from '../utils/formatters.js';
 
@@ -33,6 +33,7 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
   const [budgetModalCampaign, setBudgetModalCampaign] = useState<Campaign | null>(null);
   const [settingsModalCampaign, setSettingsModalCampaign] = useState<Campaign | null>(null);
   const [verifyModalCampaign, setVerifyModalCampaign] = useState<Campaign | null>(null);
+  const [upgradeModalCampaign, setUpgradeModalCampaign] = useState<Campaign | null>(null);
   const [addBudgetAmount, setAddBudgetAmount] = useState<number>(10);
   const [isAddingBudget, setIsAddingBudget] = useState(false);
 
@@ -50,10 +51,29 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
 
   useEffect(() => {
     fetchCampaigns();
+    const interval = setInterval(() => {
+      fetchCampaigns(true);
+    }, 6000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Poll while visible only (auto-pauses when tab hidden)
-  useVisibilityPoll(() => fetchCampaigns(true), 6000, []);
+  const handleActivateTestCampaign = async (campaignId: string) => {
+    try {
+      const res = await api.transitionCampaignStatus(campaignId, 'active');
+      fetchCampaigns(true);
+      toast({
+        title: '🎉 Campaign Activated Live!',
+        description: res.message || 'Campaign is now actively receiving verified traffic.',
+        variant: 'success'
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Activation Failed',
+        description: err.message,
+        variant: 'error'
+      });
+    }
+  };
 
   const handleToggleStatus = async (id: string) => {
     try {
@@ -101,6 +121,45 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
     } catch (err: any) {
       toast({
         title: 'Dispatch Failed',
+        description: err.message,
+        variant: 'error'
+      });
+    }
+  };
+
+  const handleStepVisit = async (campaign: Campaign) => {
+    try {
+      const res = await api.stepCampaignVisit(campaign.id);
+      const visit = res.result;
+      toast({
+        title: '🎯 Visit Step Delivered',
+        description: `Delivered visit to ${visit.targetUrl} via ${visit.country} (HTTP ${visit.httpStatus}). Deducted ${visit.spentCredits} CR.`,
+        variant: 'success'
+      });
+      fetchCampaigns(true);
+      refreshUser();
+    } catch (err: any) {
+      toast({
+        title: 'Step Visit Failed',
+        description: err.message,
+        variant: 'error'
+      });
+    }
+  };
+
+  const handleTriggerScheduler = async () => {
+    try {
+      const res = await api.triggerSchedulerTick();
+      toast({
+        title: '⚡ Scheduler Cycle Triggered',
+        description: `Autonomous loop processed ${res.result.activeCampaignsCount} active campaigns (${res.result.deliveredCount} visits delivered).`,
+        variant: 'success'
+      });
+      fetchCampaigns(true);
+      refreshUser();
+    } catch (err: any) {
+      toast({
+        title: 'Scheduler Trigger Failed',
         description: err.message,
         variant: 'error'
       });
@@ -202,6 +261,16 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
             <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
               <button
                 type="button"
+                onClick={handleTriggerScheduler}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-800/80 bg-amber-950/60 px-3 py-1.5 text-xs font-bold text-amber-300 hover:bg-amber-900/60 transition-colors shadow-sm"
+                title="Manually tick the autonomous background traffic scheduler"
+              >
+                <Zap className="h-3.5 w-3.5 text-amber-400" />
+                <span>Run Scheduler Cycle</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   const targetCamp = campaigns.find(c => c.status === 'active') || campaigns[0];
                   if (targetCamp) setVerifyModalCampaign(targetCamp);
@@ -220,7 +289,7 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         {/* Status Pills */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {['all', 'active', 'pending_review', 'paused', 'completed', 'rejected'].map((st) => (
+          {['all', 'active', 'test', 'pending_review', 'paused', 'completed', 'rejected'].map((st) => (
             <button
               key={st}
               onClick={() => setFilterStatus(st)}
@@ -277,9 +346,12 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
               onViewStats={(id) => setSelectedStatsCampaignId(id)}
               onDelete={handleDeleteCampaign}
               onDispatchTraffic={handleDispatchTraffic}
+              onStepVisit={handleStepVisit}
               onTestSurf={handleTestSurf}
               onOpenSettings={(c) => setSettingsModalCampaign(c)}
               onVerifySettings={(c) => setVerifyModalCampaign(c)}
+              onActivateTestCampaign={handleActivateTestCampaign}
+              onOpenUpgradeModal={(c) => setUpgradeModalCampaign(c)}
             />
           ))}
         </div>
@@ -369,6 +441,18 @@ export function CampaignsPage({ onNavigate }: CampaignsPageProps) {
           </div>
         </form>
       </Modal>
+
+      {/* Campaign Upgrade & Category Modal */}
+      <CampaignUpgradeModal
+        isOpen={!!upgradeModalCampaign}
+        campaign={upgradeModalCampaign}
+        onClose={() => setUpgradeModalCampaign(null)}
+        onUpgraded={() => {
+          setUpgradeModalCampaign(null);
+          fetchCampaigns(true);
+          refreshUser();
+        }}
+      />
     </div>
   );
 }

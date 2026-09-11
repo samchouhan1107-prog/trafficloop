@@ -191,8 +191,6 @@ export function TriStationCard({
   const dwellProgress = station.dwellDurationSeconds > 0
     ? Math.min(100, Math.round((station.elapsedSeconds / station.dwellDurationSeconds) * 100))
     : 0;
-  const remainingSeconds = Math.max(0, station.dwellDurationSeconds - station.elapsedSeconds);
-  const isNearComplete = station.status === 'active' && remainingSeconds <= 5;
 
   const geo = station.geoEndpoint;
   const perf = station.performance;
@@ -569,9 +567,7 @@ export function TriStationCard({
               <div
                 className={`h-full transition-all duration-1000 ${
                   station.status === 'active'
-                    ? isNearComplete
-                      ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 animate-pulse'
-                      : 'bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400'
+                    ? 'bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400'
                     : station.status === 'navigating' || station.status === 'verifying_geo'
                     ? 'bg-cyan-500 animate-pulse'
                     : station.status === 'completed'
@@ -590,11 +586,6 @@ export function TriStationCard({
                     <Activity className="h-4 w-4 animate-pulse" />
                     <span className="text-xs font-bold font-mono tracking-wider">
                       VIEWPORT ENGAGED · {station.elapsedSeconds}s / {station.dwellDurationSeconds}s
-                      {station.status === 'active' && (
-                        <span className={`ml-1.5 ${isNearComplete ? 'text-emerald-400 animate-pulse' : 'text-amber-300'}`}>
-                          ({remainingSeconds}s left)
-                        </span>
-                      )}
                     </span>
                   </div>
 

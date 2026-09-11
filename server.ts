@@ -1,10 +1,11 @@
-import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import cors from 'cors';
+import compression from 'compression';
 import { createServer as createViteServer } from 'vite';
-import { initializeDatabase } from './server/database/db.js';
+import { initializeDatabase, db } from './server/database/db.js';
 import { seedDatabase } from './server/database/seed.js';
 import { authRoutes } from './server/routes/authRoutes.js';
 import { campaignRoutes } from './server/routes/campaignRoutes.js';
@@ -16,14 +17,17 @@ import { systemRoutes } from './server/routes/systemRoutes.js';
 import { paymentRoutes } from './server/routes/paymentRoutes.js';
 import { triStationRoutes } from './server/routes/triStationRoutes.js';
 import { rewardRoutes } from './server/routes/rewardRoutes.js';
+import { notificationRoutes } from './server/routes/notificationRoutes.js';
+import { cycleRoutes } from './server/routes/cycleRoutes.js';
 import { TrafficDeliveryWorkerService } from './server/services/trafficDeliveryWorkerService.js';
-import { createRateLimiter } from './server/middleware/rateLimit.js';
+import { SeoService } from './server/services/seoService.js';
 
 async function startServer() {
   try {
     // 1. Initialize SQLite Database Schema & Run Seeder
     initializeDatabase();
     await seedDatabase();
+    SeoService.syncAllCampaignsSeo();
 
     // 2. Start Autonomous Live Traffic Delivery Engine
     TrafficDeliveryWorkerService.startAutonomousTrafficDispatcher();
@@ -31,99 +35,170 @@ async function startServer() {
     const app = express();
     const PORT = 3000;
 
-    // Standard middlewares
-    app.use(express.json());
+    // Security & performance middlewares
+    app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+    app.use(cors({ origin: process.env.APP_URL || true, credentials: true }));
+    app.use(compression());
+    app.use(express.json({ limit: '1mb' }));
     app.use(cookieParser());
-
-    // Gzip compression for API + static responses (built-in zlib, zero deps)
-    app.use((req, res, next) => {
-      const acceptEncoding = req.headers['accept-encoding'] || '';
-      if (!acceptEncoding.includes('gzip') || res.getHeader('Content-Encoding')) return next();
-
-      const gzip = zlib.createGzip({ level: 6 });
-      res.setHeader('Content-Encoding', 'gzip');
-      res.removeHeader('Content-Length');
-
-      // Route writes through the gzip stream
-      const originalWrite = res.write.bind(res);
-      const originalEnd = res.end.bind(res);
-      res.write = ((chunk: any, encoding?: BufferEncoding, cb?: (error?: Error | null) => void) => {
-        gzip.write(chunk, encoding);
-        if (cb) cb(null);
-        return true;
-      }) as any;
-      res.end = ((chunk?: any, encoding?: BufferEncoding, cb?: () => void) => {
-        if (chunk && chunk.length > 0) gzip.write(chunk, encoding);
-        gzip.end();
-        gzip.on('data', (d) => originalWrite(d));
-        gzip.on('end', () => originalEnd(undefined, encoding, cb));
-        return res as any;
-      }) as any;
-      res.on('close', () => gzip.destroy());
-      next();
-    });
-
-    // Static asset cache headers (Vite emits hashed filenames → long-lived cache)
-    app.use((req, res, next) => {
-      if (process.env.NODE_ENV === 'production') {
-        const isAsset = /\.(js|css|woff2?|png|jpg|jpeg|svg|webp|ico)(\?|$)/.test(req.path);
-        res.setHeader('Cache-Control', isAsset
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=0, must-revalidate');
-      }
-      next();
-    });
-
-    // Security headers (inline helmet-equivalent)
-    app.use((req, res, next) => {
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('X-XSS-Protection', '1; mode=block');
-      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none';");
-      if (process.env.NODE_ENV === 'production') {
-        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
-      }
-      next();
-    });
-
-    // CORS allowlist (inline cors-equivalent)
-    const ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
-      ? process.env.CORS_ALLOWED_ORIGINS.split(',').map(o => o.trim())
-      : (process.env.NODE_ENV === 'production'
-          ? [process.env.APP_URL || 'https://trafficloop.network'].filter(Boolean)
-          : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173']);
-
-    app.use((req, res, next) => {
-      const origin = req.headers.origin;
-      if (origin && ALLOWED_ORIGINS.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      }
-      if (req.method === 'OPTIONS') {
-        res.status(204).end();
-        return;
-      }
-      next();
-    });
-
-    // Global rate limiter for API endpoints
-    const apiLimiter = createRateLimiter(300, 60 * 1000, 'Too many requests. Please slow down.');
-    app.use('/api/', apiLimiter);
 
     // 2. Mount API Endpoints FIRST
     app.use('/api/system', systemRoutes);
     app.use('/api/auth', authRoutes);
     app.use('/api/campaigns', campaignRoutes);
     app.use('/api/surf', surfRoutes);
+    app.use('/api/cycle', cycleRoutes);
     app.use('/api/credits', creditRoutes);
     app.use('/api/payments', paymentRoutes);
     app.use('/api/rewards', rewardRoutes);
     app.use('/api/analytics', analyticsRoutes);
     app.use('/api/admin', adminRoutes);
     app.use('/api/tri-station', triStationRoutes);
+    app.use('/api/notifications', notificationRoutes);
+
+    // SEO / Search Console Readiness: robots.txt
+    app.get('/robots.txt', (req, res) => {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const robotsTxt = [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /api/',
+        'Disallow: /admin',
+        `Sitemap: ${baseUrl}/sitemap.xml`
+      ].join('\n');
+      res.type('text/plain').send(robotsTxt);
+    });
+
+    // SEO / Search Console Readiness: sitemap.xml
+    app.get('/sitemap.xml', (req, res) => {
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const pages = SeoService.getSitemapEntries(baseUrl);
+
+      const sitemap = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        ...pages.map(p => `  <url>
+    <loc>${p.loc}</loc>
+    <lastmod>${p.lastmod}</lastmod>
+    <changefreq>${p.changefreq}</changefreq>
+    <priority>${p.priority}</priority>
+  </url>`),
+        '</urlset>'
+      ].join('\n');
+
+      res.type('application/xml').send(sitemap);
+    });
+
+    // Public indexable showcase page for Search Console & crawlers
+    app.get('/showcase/:slug', (req, res) => {
+      const { slug } = req.params;
+      const item = SeoService.getShowcaseBySlug(slug);
+
+      if (!item) {
+        res.status(404).set('X-Robots-Tag', 'noindex').type('text/html').send(`<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Showcase Not Found - TrafficLoop</title><meta name="robots" content="noindex" /></head>
+<body style="font-family:sans-serif;padding:40px;text-align:center;background:#0B0F19;color:#F8FAFC;">
+  <h1>404 - Campaign Showcase Not Found</h1>
+  <p>The requested campaign showcase does not exist or has been archived.</p>
+  <a href="/" style="color:#3B82F6;">Return to TrafficLoop</a>
+</body>
+</html>`);
+        return;
+      }
+
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const canonicalUrl = `${baseUrl}/showcase/${item.slug}`;
+      const safeTitle = String(item.title).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeDesc = String(item.meta_description).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeCategory = String(item.category).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      res.type('text/html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${safeTitle} - Verified Showcase | TrafficLoop</title>
+  <meta name="description" content="${safeDesc}" />
+  <link rel="canonical" href="${canonicalUrl}" />
+  <meta name="robots" content="index, follow" />
+  
+  <meta property="og:title" content="${safeTitle} - Verified Showcase" />
+  <meta property="og:description" content="${safeDesc}" />
+  <meta property="og:url" content="${canonicalUrl}" />
+  <meta property="og:type" content="website" />
+  
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0B0F19; color: #F8FAFC; margin: 0; padding: 40px 20px; }
+    .container { max-width: 760px; margin: 0 auto; background: #111827; border: 1px solid #1F2937; border-radius: 12px; padding: 32px; }
+    .badge { display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; text-transform: uppercase; background: rgba(16, 185, 129, 0.1); color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3); }
+    h1 { font-size: 26px; margin: 16px 0 8px; color: #FFFFFF; }
+    p.desc { color: #9CA3AF; line-height: 1.6; font-size: 15px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 24px 0; }
+    .card { background: #1F2937; padding: 16px; border-radius: 8px; border: 1px solid #374151; }
+    .label { font-size: 12px; color: #9CA3AF; text-transform: uppercase; margin-bottom: 4px; }
+    .val { font-size: 18px; font-weight: 700; color: #F9FAFB; }
+    .btn { display: inline-block; background: #2563EB; color: #FFFFFF; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; }
+    .btn:hover { background: #1D4ED8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <span class="badge">Verified Traffic Campaign</span>
+    <h1>${safeTitle}</h1>
+    <p class="desc">${safeDesc}</p>
+    
+    <div class="grid">
+      <div class="card">
+        <div class="label">Category</div>
+        <div class="val">${safeCategory}</div>
+      </div>
+      <div class="card">
+        <div class="label">Total Verified Visits</div>
+        <div class="val">${item.total_visits_received || 0}</div>
+      </div>
+      <div class="card">
+        <div class="label">Health Status</div>
+        <div class="val" style="color:#10B981;">Active &amp; Monitored</div>
+      </div>
+    </div>
+
+    <a href="/" class="btn">Explore TrafficLoop Platform</a>
+  </div>
+</body>
+</html>`);
+    });
+
+    // Server/Service Health check endpoint
+    app.get('/api/health', (req, res) => {
+      try {
+        const dbCheck = db.prepare('SELECT 1 as alive').get() as any;
+        const memoryUsage = process.memoryUsage();
+
+        res.json({
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          uptimeSeconds: Math.floor(process.uptime()),
+          database: dbCheck?.alive === 1 ? 'connected' : 'degraded',
+          memory: {
+            heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+            heapTotalMB: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+            rssMB: Math.round(memoryUsage.rss / 1024 / 1024)
+          },
+          services: {
+            trafficDispatcher: 'running',
+            campaignHealthMonitor: 'active',
+            rewardLedgerSync: 'operational'
+          }
+        });
+      } catch (err: any) {
+        res.status(500).json({
+          status: 'degraded',
+          error: err.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
 
     // Global API fallback
     app.get('/api/*', (req, res) => {

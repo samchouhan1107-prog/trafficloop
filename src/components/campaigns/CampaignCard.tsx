@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Play, Pause, PlusCircle, BarChart3, Trash2, Globe, Clock, Coins, Eye, CheckCircle2, Zap, ExternalLink, Settings2, Sliders, ShieldCheck, MapPin } from 'lucide-react';
+import { Play, Pause, PlusCircle, BarChart3, Trash2, Globe, Clock, Coins, Eye, CheckCircle2, Zap, ExternalLink, Settings2, Sliders, ShieldCheck, MapPin, MousePointerClick, Rocket, Sparkles } from 'lucide-react';
 import { Campaign } from '../../types.js';
 import { Badge } from '../common/Badge.js';
 import { formatCredits, formatNumber } from '../../utils/formatters.js';
+import { CampaignVisualBanner } from './CampaignVisualBanner.js';
 
 interface CampaignCardProps {
   key?: string;
@@ -12,9 +13,12 @@ interface CampaignCardProps {
   onViewStats: (id: string) => void;
   onDelete: (id: string) => void;
   onDispatchTraffic?: (campaign: Campaign, count: number) => void;
+  onStepVisit?: (campaign: Campaign) => void;
   onTestSurf?: (campaign: Campaign) => void;
   onOpenSettings?: (campaign: Campaign) => void;
   onVerifySettings?: (campaign: Campaign) => void;
+  onActivateTestCampaign?: (campaignId: string) => Promise<void>;
+  onOpenUpgradeModal?: (campaign: Campaign) => void;
 }
 
 export function CampaignCard({
@@ -24,13 +28,27 @@ export function CampaignCard({
   onViewStats,
   onDelete,
   onDispatchTraffic,
+  onStepVisit,
   onTestSurf,
   onOpenSettings,
-  onVerifySettings
+  onVerifySettings,
+  onActivateTestCampaign,
+  onOpenUpgradeModal
 }: CampaignCardProps) {
   const [isBoosting, setIsBoosting] = useState(false);
+  const [isStepping, setIsStepping] = useState(false);
   const budgetProgress = Math.min(100, Math.round((campaign.spent_credits / campaign.credit_budget) * 100));
   const remainingCredits = Math.max(0, Number((campaign.credit_budget - campaign.spent_credits).toFixed(2)));
+
+  const handleStepVisit = async () => {
+    if (!onStepVisit || isStepping) return;
+    setIsStepping(true);
+    try {
+      await onStepVisit(campaign);
+    } finally {
+      setIsStepping(false);
+    }
+  };
 
   const handleQuickBoost = async (count: number) => {
     if (!onDispatchTraffic || isBoosting) return;
@@ -109,6 +127,39 @@ export function CampaignCard({
                   {campaign.device_targeting === 'desktop' ? '💻 Desktop' : '📱 Mobile'}
                 </span>
               )}
+
+              {/* GA4 Measurement ID Badge */}
+              {campaign.ga4_measurement_id ? (
+                <span
+                  className="rounded bg-emerald-950/80 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300 border border-emerald-800/80 flex items-center gap-1 cursor-pointer hover:bg-emerald-900/60"
+                  onClick={() => onOpenSettings && onOpenSettings(campaign)}
+                  title="Google Analytics 4 Active: Live beacons dispatched on every visit"
+                >
+                  <BarChart3 className="w-2.5 h-2.5 text-emerald-400" />
+                  <span>{campaign.ga4_measurement_id}</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenSettings && onOpenSettings(campaign)}
+                  className="rounded bg-slate-800/80 px-2 py-0.5 text-[10px] font-medium text-slate-400 border border-slate-700/60 flex items-center gap-1 hover:text-cyan-300 hover:border-cyan-700/60"
+                  title="Link GA4 Measurement ID to see live visits on Google Analytics Realtime"
+                >
+                  <BarChart3 className="w-2.5 h-2.5 text-cyan-400" />
+                  <span>+ Link GA4</span>
+                </button>
+              )}
+
+              {/* Multiple URLs Rotation Badge */}
+              {campaign.urls && campaign.urls.length > 1 && (
+                <span
+                  className="rounded bg-indigo-950/80 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 border border-indigo-800/80 flex items-center gap-1"
+                  title={`Rotating between ${campaign.urls.length} destination URLs. Next visit will hit URL #${((campaign.url_cursor || 0) % campaign.urls.length) + 1}`}
+                >
+                  <span>🔄 {campaign.urls.length} URLs (Next: #{((campaign.url_cursor || 0) % campaign.urls.length) + 1})</span>
+                </span>
+              )}
+
               <Badge status={campaign.status} />
             </div>
 
@@ -131,6 +182,15 @@ export function CampaignCard({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Visual Short Banner Results Strip */}
+        <div className="mt-3">
+          <CampaignVisualBanner
+            campaign={campaign}
+            onActivateTestCampaign={onActivateTestCampaign}
+            onOpenUpgradeModal={onOpenUpgradeModal}
+          />
         </div>
 
         {/* Geo Restriction Summary Strip */}
@@ -157,7 +217,7 @@ export function CampaignCard({
         </div>
 
         {/* Key Metrics Grid */}
-        <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg border border-slate-800/80 bg-slate-950/50 p-3 text-center">
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border border-slate-800/80 bg-slate-950/50 p-3 text-center">
           <div>
             <span className="text-[10px] uppercase font-semibold text-slate-500">Duration</span>
             <div className="mt-0.5 flex items-center justify-center gap-1 text-xs font-bold text-white">
@@ -181,22 +241,15 @@ export function CampaignCard({
               <span>{formatNumber(campaign.total_visits_received)}</span>
             </div>
           </div>
-        </div>
 
-        {/* Lifetime Bonus Quota Strip */}
-        {(campaign.bonus_visit_limit || 0) > 0 && (
-          <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-amber-700/40 bg-gradient-to-r from-amber-950/40 to-cyan-950/30 px-2.5 py-1.5 text-[11px]">
-            <div className="flex items-center gap-1.5 text-amber-300">
-              <Zap className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-              <span className="font-bold">Lifetime URL Bonus:</span>
-              <span className="font-mono font-semibold text-white">
-                {formatNumber(Math.max(0, (campaign.bonus_visit_limit || 0) - (campaign.bonus_visits_delivered || 0)))}
-              </span>
-              <span className="text-amber-200/80">free visits left</span>
+          <div>
+            <span className="text-[10px] uppercase font-semibold text-slate-500">Clicks Recv</span>
+            <div className="mt-0.5 flex items-center justify-center gap-1 text-xs font-bold text-cyan-300">
+              <MousePointerClick className="h-3 w-3 text-cyan-400" />
+              <span>{formatNumber(campaign.total_clicks_received || 0)}</span>
             </div>
-            <span className="text-[10px] text-amber-200/70 font-semibold">of {formatNumber(campaign.bonus_visit_limit)} lifetime</span>
           </div>
-        )}
+        </div>
 
         {/* Budget Progress Bar */}
         <div className="mt-4">
@@ -225,7 +278,7 @@ export function CampaignCard({
         </div>
 
         {/* Live Traffic Delivery Actions */}
-        {campaign.status === 'active' && (remainingCredits > 0 || ((campaign.bonus_visit_limit || 0) - (campaign.bonus_visits_delivered || 0)) > 0) && (
+        {campaign.status === 'active' && remainingCredits > 0 && (
           <div className="mt-3.5 flex items-center justify-between gap-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 p-2 text-xs">
             <div className="flex items-center gap-1.5 text-cyan-300">
               <span className="relative flex h-2 w-2">
@@ -236,6 +289,17 @@ export function CampaignCard({
             </div>
 
             <div className="flex items-center gap-1.5">
+              {onStepVisit && (
+                <button
+                  disabled={isStepping}
+                  onClick={handleStepVisit}
+                  className="flex items-center gap-1 rounded bg-cyan-900/80 hover:bg-cyan-800 text-cyan-200 border border-cyan-700/60 px-2 py-1 text-[10px] font-bold transition-colors disabled:opacity-50"
+                  title="Deliver the next scheduled visit immediately (advances URL and Geo rotation)"
+                >
+                  <Rocket className="h-3 w-3 text-cyan-400" />
+                  <span>{isStepping ? 'Visiting...' : 'Step Visit'}</span>
+                </button>
+              )}
               {onTestSurf && (
                 <button
                   onClick={() => onTestSurf(campaign)}
@@ -273,6 +337,17 @@ export function CampaignCard({
       {/* Action Footer */}
       <div className="mt-5 flex items-center justify-between border-t border-slate-800/80 pt-3">
         <div className="flex items-center gap-1.5">
+          {campaign.status === 'test' && (
+            <button
+              onClick={() => onActivateTestCampaign && onActivateTestCampaign(campaign.id)}
+              className="flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 text-xs font-bold shadow-sm transition-colors"
+              title="Promote campaign from Test to Active status"
+            >
+              <Rocket className="h-3.5 w-3.5" />
+              <span>Activate Live</span>
+            </button>
+          )}
+
           {(campaign.status === 'active' || campaign.status === 'paused') && (
             <button
               onClick={() => onToggleStatus(campaign.id)}

@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { ThemeProvider, useTheme } from './context/ThemeContext.js';
 import { ToastProvider } from './context/ToastContext.js';
+import { NotificationProvider } from './context/NotificationContext.js';
 import { ToastContainer } from './components/common/ToastContainer.js';
+import { InactivityBanner } from './components/common/InactivityBanner.js';
 import { ErrorBoundary } from './components/common/ErrorBoundary.js';
 import { Header } from './components/layout/Header.js';
 import { Footer } from './components/layout/Footer.js';
@@ -17,6 +19,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { ProfilePage } from './pages/ProfilePage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { RewardsPage } from './pages/RewardsPage.js';
+import { activityTracker } from './services/activityTracker.js';
 
 function AppContent() {
   const { isAuthenticated, isLoading, isAdmin } = useAuth();
@@ -56,12 +59,31 @@ function AppContent() {
     }
   }, [isAuthenticated, isLoading, currentPath]);
 
+  // Record legitimate user exploration when an authenticated user explores platform features
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && currentPath) {
+      let feature = '';
+      if (currentPath.startsWith('/dashboard')) feature = 'dashboard';
+      else if (currentPath.startsWith('/campaigns')) feature = 'campaigns';
+      else if (currentPath.startsWith('/surf')) feature = 'surf_arena';
+      else if (currentPath.startsWith('/tri-station')) feature = 'tri_station';
+      else if (currentPath.startsWith('/rewards')) feature = 'rewards_hub';
+      else if (currentPath.startsWith('/analytics')) feature = 'analytics';
+      else if (currentPath.startsWith('/profile')) feature = 'profile';
+      else if (currentPath.startsWith('/admin')) feature = 'admin_console';
+
+      if (feature) {
+        activityTracker.recordExploration(currentPath, feature);
+      }
+    }
+  }, [currentPath, isAuthenticated, isLoading]);
+
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-glow-cyan text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-10 w-10 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin shadow-lg shadow-cyan-950" />
-          <span className="text-xs font-medium tracking-wide animate-pulse">Connecting to TrafficLoop Network...</span>
+          <div className="h-8 w-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <span className="text-xs font-medium tracking-wide">Connecting to TrafficLoop Network...</span>
         </div>
       </div>
     );
@@ -106,6 +128,7 @@ function AppContent() {
       theme === 'light' ? 'bg-slate-900 text-slate-100' : 'bg-slate-950 text-slate-100'
     }`}>
       <ToastContainer />
+      <InactivityBanner />
       <Header currentPath={currentPath} onNavigate={navigate} />
 
       <main className="flex-1 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pt-6">
@@ -123,7 +146,9 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <AppContent />
+            <NotificationProvider>
+              <AppContent />
+            </NotificationProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>
